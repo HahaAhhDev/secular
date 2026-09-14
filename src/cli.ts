@@ -75,9 +75,15 @@ function parseArgs(argv: string[]): Args {
       case "-o":
         args.output = rest.shift();
         break;
-      case "--min-severity":
-        args.minSeverity = rest.shift();
+      case "--min-severity": {
+        const sev = rest.shift();
+        if (!sev || !SEV_ORDER.includes(sev)) {
+          console.error(`error: --min-severity must be one of: ${SEV_ORDER.join(", ")}`);
+          process.exit(2);
+        }
+        args.minSeverity = sev;
         break;
+      }
       case "--refresh":
         args.refresh = true;
         break;
@@ -145,6 +151,17 @@ ${"\u001b[1m"}EXAMPLES${"\u001b[0m"}
 
 const SEV_ORDER = ["info", "warning", "error", "critical"];
 
+/** Write output to a file with a friendly error if the path is unwritable. */
+function writeOutput(out: string, file: string): void {
+  try {
+    fs.writeFileSync(file, out + (out.endsWith("\n") ? "" : "\n"));
+    console.error(`\u2713 Report written to ${file}`);
+  } catch (err) {
+    console.error(`error: cannot write to ${file}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
+    process.exit(2);
+  }
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -164,8 +181,7 @@ async function main(): Promise<number> {
     const report = await scan({ root: args.dir, refreshCatalog: args.refresh });
     const notices = toNotices(report);
     const out = args.output ?? "THIRD-PARTY-NOTICES.md";
-    fs.writeFileSync(out, notices);
-    console.log(`\u2713 Wrote ${out}`);
+    writeOutput(notices, out);
     return 0;
   }
 
@@ -240,8 +256,7 @@ async function main(): Promise<number> {
   }
 
   if (args.output) {
-    fs.writeFileSync(args.output, out + (out.endsWith("\n") ? "" : "\n"));
-    console.error(`\u2713 Report written to ${args.output}`);
+    writeOutput(out, args.output);
   } else {
     console.log(out);
   }
