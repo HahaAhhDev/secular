@@ -11,7 +11,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { scan } from "./scan.js";
+import { scan, heuristicNetworkService } from "./scan.js";
+import { evaluate, complianceScore } from "./rules.js";
 import { adjudicate, resolveAiConfig, type Adjudication } from "./ai.js";
 import { terminal, toJson, toMarkdown, toSarif, toNotices } from "./report.js";
 import { loadCatalog } from "./spdx.js";
@@ -206,15 +207,22 @@ async function main(): Promise<number> {
     }
   }
 
-  // Re-run rules with AI-augmented third-party set.
-  if (aiCfg && report.thirdParty.size) {
-    const reScan = await scan({ root: args.dir, catalog: await loadCatalog() });
-    // Keep AI augmentations in the fresh scan's third-party map.
-    for (const [id, v] of report.thirdParty) {
-      if (!reScan.thirdParty.has(id)) reScan.thirdParty.set(id, v);
-    }
-    report.findings = reScan.findings;
-    report.score = reScan.score;
+  // Re-evaluate rules with the AI-augmented third-party set (no re-walk needed).
+  if (aiCfg) {
+    report.findings = evaluate({
+      projectLicenses: report.projectLicenses,
+      thirdParty: report.thirdParty,
+      proprietary: [...report.projectLicenses.values()].some(
+        (i) => i.category === "strong-copyleft" || i.category === "weak-copyleft"
+      )
+        ? false
+        : true,
+      networkService: heuristicNetworkService(report.root),
+      hasNoticeFile: report.licenseFiles.some((h) =>
+        /(^|\/)(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(h.file))
+      ),
+    });
+    report.score = complianceScore(report.findings);
   }
 
   // Severity filter.

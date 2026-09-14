@@ -26,6 +26,8 @@ export interface ScanContext {
   proprietary: boolean;
   /** true when the project looks like it ships a network service (AGPL relevance). */
   networkService: boolean;
+  /** true when a NOTICE/THIRD-PARTY/LEGAL attribution file exists. */
+  hasNoticeFile?: boolean;
 }
 
 const ORDER: Record<Severity, number> = { critical: 0, error: 1, warning: 2, info: 3 };
@@ -131,7 +133,7 @@ export function evaluate(ctx: ScanContext): Finding[] {
   const attributionNeeded = [...ctx.thirdParty.keys()].filter((id) =>
     ["MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "Zlib", "BSL-1.0"].includes(id)
   );
-  if (attributionNeeded.length > 0 && ctx.proprietary) {
+  if (attributionNeeded.length > 0 && ctx.proprietary && !ctx.hasNoticeFile) {
     findings.push({
       rule: "MISSING-NOTICE",
       severity: "info",

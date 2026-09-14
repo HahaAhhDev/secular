@@ -60,6 +60,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
 
   const files = walk(root);
   const licenseFiles: LicenseHit[] = [];
+  const rootLicenses = new Map<string, { category: Category; file?: string }>();
   const projectLicenses = new Map<string, { category: Category; file?: string }>();
   const thirdParty = new Map<string, { category: Category; files: string[] }>();
   const deps: Dep[] = [];
@@ -98,6 +99,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
 
     if (hit.id) {
       if (isRootLicense(f)) {
+        rootLicenses.set(hit.id, { category: getMeta(hit.id).category, file: f.rel });
         projectLicenses.set(hit.id, { category: getMeta(hit.id).category, file: f.rel });
       } else {
         // Vendored/nested third-party license
@@ -150,7 +152,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
     }
   }
 
-  const proprietary = opts.proprietary ?? heuristicProprietary(root, projectLicenses);
+  const proprietary = opts.proprietary ?? heuristicProprietary(root, rootLicenses);
   const networkService = heuristicNetworkService(root);
 
   const ctx: ScanContext = {
@@ -158,6 +160,9 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
     thirdParty,
     proprietary,
     networkService,
+    hasNoticeFile: files.some(
+      (f) => f.kind === "license" && /(^|\/)(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(f.rel))
+    ),
   };
   const findings = evaluate(ctx);
   const score = complianceScore(findings);
@@ -191,21 +196,15 @@ function parseManifest(f: FoundFile): Dep[] {
   return [];
 }
 
-function heuristicProprietary(root: string, projectLicenses: Map<string, { category: Category }>): boolean {
+function heuristicProprietary(root: string, rootLicenses: Map<string, { category: Category }>): boolean {
   // If there's no root LICENSE at all, assume proprietary/closed-source context.
-  const hasRoot = fs.existsSync(path.join(root, "LICENSE")) ||
-    fs.existsSync(path.join(root, "LICENSE.md")) ||
-    fs.existsSync(path.join(root, "LICENSE.txt")) ||
-    fs.existsSync(path.join(root, "COPYING"));
-  if (!hasRoot) return true;
-  // If root license exists and is copyleft, assume open-source intent.
-  for (const [, info] of projectLicenses) {
-    if (info.category === "strong-copyleft" || info.category === "weak-copyleft") return false;
-  }
-  return true;
+  if (rootLicenses.size === 0) return true;
+  // A root LICENSE that is permissive/public-domain/copyleft implies open-source intent;
+  // third-party copyleft findings still get flagged by the rules engine.
+  return false;
 }
 
-function heuristicNetworkService(root: string): boolean {
+export function heuristicNetworkService(root: string): boolean {
   try {
     const pkg = path.join(root, "package.json");
     if (fs.existsSync(pkg)) {
