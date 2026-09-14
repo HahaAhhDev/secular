@@ -1,0 +1,43 @@
+{
+  "name": "secular",
+  "version": "1.0.0",
+  "description": "Elite AI-powered license compliance scanning for codebases. Enter an API key, get world-class LICENSE violation detection.",
+  "type": "module",
+  "bin": {
+    "secular": "dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HahaAhhDev/secular.git"
+  },
+  "keywords": [
+    "license",
+    "compliance",
+    "spdx",
+    "copyleft",
+    "scanner",
+    "audit",
+    "ai",
+    "sarif",
+    "security"
+  ],
+  "author": "HahaAhhDev",
+  "license": "CPL-1.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "secular": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^7.0.2"
+  }
+}
