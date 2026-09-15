@@ -67,10 +67,13 @@ const M: Record<string, LicenseMeta> = {
 };
 
 export function getMeta(id: string): LicenseMeta {
-  // Normalize deprecated SPDX "or-later"/"only" forms (GPL-3.0+ → GPL-3.0-or-later).
+  // Normalize deprecated SPDX short forms (GPL-3.0+ → GPL-3.0-or-later,
+  // GPL-3.0 → GPL-3.0-only, GPL-2.0 → GPL-2.0-only, etc.).
   const canonical = id
-    .replace(/^(.+)-or-later\+$/i, "$1-or-later")
-    .replace(/^(GPL|LGPL|AGPL)-(\d\.\d)\+$/i, "$1-$2-or-later");
+    .replace(/^(GPL|LGPL|AGPL)-(\d\.\d)\+$/i, "$1-$2-or-later")
+    .replace(/^(GPL|LGPL|AGPL)-(\d\.\d)$/i, "$1-$2-only")
+    .replace(/^(GPL|LGPL|AGPL)-\d$/i, "$1-x-only") // not a real id; fallthrough
+    .replace(/^(.+)-or-later\+$/i, "$1-or-later");
   const base = canonical.split("+")[0]!.split(" WITH ")[0]!;
   return (
     M[canonical] ??

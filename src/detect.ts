@@ -65,6 +65,13 @@ export interface FingerprintMatch {
   name: string;
   /** Containment similarity 0..1 */
   score: number;
+  /** Text-length similarity 0..1 (1 = identical length) */
+  lenSim: number;
+  /**
+   * True when the candidate's text is substantially longer than the query —
+   * the query may be a partial excerpt, so the match is inherently ambiguous.
+   */
+  partial?: boolean;
   /** True when the matched license id is deprecated by SPDX. */
   deprecated?: boolean;
 }
@@ -82,15 +89,19 @@ export function identify(
   if (norm.length < 40) return [];
   const sh = shingles(norm);
   const scored = index.licenses
-    .map((l) => ({
-      id: l.id,
-      name: l.name,
-      score: containment(sh, l.sh),
-      // Length similarity: prefer candidates whose text length is closest to
-      // the query's — disambiguates supersets like FSL-1.1-MIT vs plain MIT.
-      lenSim: 1 - Math.abs(l.norm.length - norm.length) / Math.max(l.norm.length, norm.length, 1),
-      deprecated: deprecatedIds?.has(l.id),
-    }))
+    .map((l) => {
+      const lenSim = 1 - Math.abs(l.norm.length - norm.length) / Math.max(l.norm.length, norm.length, 1);
+      return {
+        id: l.id,
+        name: l.name,
+        score: containment(sh, l.sh),
+        lenSim,
+        // Candidate text much longer than the query → the query is likely a
+        // partial excerpt; such matches are inherently less trustworthy.
+        partial: l.norm.length > norm.length * 1.4,
+        deprecated: deprecatedIds?.has(l.id),
+      };
+    })
     .sort(
       (a, b) =>
         b.score - a.score ||
@@ -101,7 +112,11 @@ export function identify(
 
   const top = scored[0];
   if (!top || top.score < 0.5) return [];
-  return scored.filter((s) => s.score >= top.score - 0.05).slice(0, 3);
+  // Prefer non-partial candidates on score ties: when the top hit is a
+  // "partial" superset match, an exact-length sibling is more credible.
+  const topCandidates = scored.filter((s) => s.score >= top.score - 0.05);
+  const confident = topCandidates.filter((s) => !s.partial);
+  return (confident.length ? confident : topCandidates).slice(0, 3);
 }
 
 export function licenseTextOf(lic: SpdxLicense): string | undefined {

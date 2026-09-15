@@ -88,10 +88,16 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
 
     const matches = identify(text, index, deprecatedIds);
     const best = matches[0];
+    const isRoot = isRootLicense(f);
+    // Root LICENSE files drive the compliance verdict, so demand near-exact
+    // confidence; vendored files can be lower. Never accept a "partial"
+    // superset match on a root file — that's how truncated texts misfire.
+    const minScore = isRoot ? 0.9 : 0.7;
+    const acceptable = best && best.score >= minScore && !(isRoot && best.partial);
     const hit: LicenseHit = {
       file: f.rel,
       matches,
-      id: best && best.score >= 0.7 ? best.id : undefined,
+      id: acceptable ? best.id : undefined,
       score: best?.score,
       excerpt: text.slice(0, 400),
     };
