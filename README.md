@@ -8,7 +8,7 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 ## How it works
 
-1. **Walk** — traverse the repo, skipping `node_modules`, `.git`, `dist`, `build`, `vendor`, and other artifact directories.
+1. **Walk** — traverse the repo, skipping `node_modules`, `.git`, `dist`, `build`, and other artifact directories. License files inside `vendor`-style directories are still collected (their source code is skipped).
 2. **Fingerprint** — normalize license text (lowercase, strip copyright years and placeholders), hash into 8-word shingles, and match against SPDX by containment similarity. A popularity prior breaks ties between near-duplicate families, so a truncated MIT file matches `MIT` — not `MIT-0` or `X11`. Root `LICENSE` files demand ≥90% confidence.
 3. **Parse manifests** — `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `Gemfile`, `composer.json`.
 4. **Detect headers** — `SPDX-License-Identifier:` tags and full license text in the first 2 KB of source files.
@@ -93,9 +93,11 @@ secular cache --refresh            # refresh the SPDX catalog cache
 | `-f, --format <fmt>` | `terminal` \| `json` \| `markdown` \| `sarif` |
 | `-o, --output <file>` | Write the report to a file |
 | `--min-severity <sev>` | Only report findings at or above: `info` \| `warning` \| `error` \| `critical` |
-| `--strict` | Exit non-zero if any finding exists (CI gate) |
+| `--strict` | Exit non-zero if any finding exists at or above the threshold (CI gate) |
 | `--refresh` | Force SPDX catalog refresh before scanning |
 | `-h, --help` / `-v, --version` | Help / version |
+
+Note: `--strict` combines with `--min-severity`. Exit code `1` without `--strict` means at least one `critical` finding.
 
 ## Exit codes
 
@@ -169,11 +171,12 @@ secular ai . --provider ollama
 
 | Variable | Purpose |
 |---|---|
-| `SECULAR_API_KEY` | LLM API key (preferred over `OPENAI_API_KEY`) |
+| `SECULAR_API_KEY` | LLM API key (preferred over `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) |
 | `SECULAR_PROVIDER` | Override provider auto-detection |
 | `SECULAR_MODEL` | Override the default model |
 | `SECULAR_BASE_URL` | Override the API endpoint |
 | `SECULAR_HOME` | Redirect the cache directory (default: home dir) |
+| `SECULAR_DEBUG` | Print full stack traces on internal errors |
 
 ## Development
 
@@ -194,6 +197,13 @@ Releases are automated: pushing a `v*` tag triggers a workflow that builds, test
 
 The helper bumps the version, runs the test suite, creates a release commit + tag, and (after confirmation) pushes both. You can also push manually with `git push origin master vX.Y.Z`.
 
+### CI
+
+Two workflows ship with the repo:
+
+- **ci.yml** — typecheck, build, tests, and CLI smoke tests on Node 18/20/22 for every push/PR, plus a scheduled weekly run that catches environment drift.
+- **release.yml** — on a pushed `v*` tag: build, test, verify the tag matches `package.json`, then publish to GitHub Packages. No secrets to configure; it uses the built-in `GITHUB_TOKEN`.
+
 Layout:
 
 ```
@@ -212,7 +222,9 @@ src/
 
 ## Troubleshooting
 
-**"Could not fetch SPDX catalog and no local cache exists"** — run `secular cache --refresh` once with network access. After that, scanning works offline.
+**No API key needed for scanning** — `scan`, `notice`, and `cache` work fully offline without any key. Only `secular ai` requires one.
+
+**"Could not fetch SPDX catalog and no local cache exists"** — run `secular cache --refresh` once with network access. After that, scanning works offline. A failed refresh falls back to the cached catalog.
 
 **License shows as "Unknown"** — the text didn't match the catalog closely enough; Secular deliberately doesn't guess. Run `secular ai .` with an API key, or fix the file's `SPDX-License-Identifier` header.
 
