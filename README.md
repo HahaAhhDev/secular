@@ -19,6 +19,19 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 Requires Node.js ≥ 18.
 
+**Install script** (Linux/macOS) — clones, builds, and puts `secular` on your PATH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh -o install.sh
+./install.sh                 # user install (~/.local); use sudo for system-wide
+
+# later:
+curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/uninstall.sh -o uninstall.sh
+./uninstall.sh
+```
+
+**From source:**
+
 ```bash
 git clone https://github.com/HahaAhhDev/secular.git
 cd secular
@@ -27,10 +40,10 @@ npm run build
 node dist/cli.js --help
 ```
 
-Optional alias:
+**Or link directly** if you have the repo cloned:
 
 ```bash
-alias secular='node /path/to/secular/dist/cli.js'
+cd secular && npm link   # `secular` available globally from any directory
 ```
 
 ## Quick start
@@ -42,6 +55,8 @@ secular notice . -o THIRD-PARTY-NOTICES.md          # attribution file
 secular ai . --api-key sk-ant-...  # + AI adjudication of custom licenses
 secular cache --refresh            # refresh the SPDX catalog cache
 ```
+
+`secular` works from any directory — pass the target project's path as the first argument (`secular scan /path/to/project`).
 
 ## Commands
 
