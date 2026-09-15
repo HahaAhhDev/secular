@@ -184,6 +184,16 @@ npm run build        # compile to dist/
 npm test             # 43 tests over detect, manifests, walker, rules, meta, report, ai
 ```
 
+### Releasing
+
+Releases are automated: pushing a `v*` tag triggers a workflow that builds, tests, and publishes to GitHub Packages.
+
+```bash
+./scripts/release.sh patch   # 1.0.0 -> 1.0.1 (also: minor, major, or an explicit x.y.z)
+```
+
+The helper bumps the version, runs the test suite, creates a release commit + tag, and (after confirmation) pushes both. You can also push manually with `git push origin master vX.Y.Z`.
+
 Layout:
 
 ```
