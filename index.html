@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Secular — License Compliance Scanning</title>
+<meta name="description" content="License compliance scanning for your codebase. Fingerprint-matches licenses against the SPDX catalog, applies a rules engine, and emits SARIF for CI.">
+<style>
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --card: #161b22; --border: #30363d; --green: #3fb950; --red: #f85149; --yellow: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px; }
+  h1 { font-size: 2.4rem; letter-spacing: -0.02em; }
+  h1 .tm { font-size: 1rem; vertical-align: super; color: var(--muted); }
+  .tagline { color: var(--muted); font-size: 1.15rem; margin: 8px 0 32px; }
+  h2 { margin: 40px 0 16px; font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .badges span { display: inline-block; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; margin-right: 8px; font-size: 0.85rem; color: var(--muted); }
+  pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0; font-size: 0.9rem; }
+  code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  p code, li code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 0.85em; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; }
+  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+  th { background: var(--card); }
+  .sev { font-weight: 600; }
+  .sev.critical { color: var(--red); } .sev.error { color: var(--red); }
+  .sev.warning { color: var(--yellow); } .sev.info { color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 20px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
+  .card h3 { margin-bottom: 8px; font-size: 1.05rem; }
+  .card p { color: var(--muted); font-size: 0.92rem; }
+  .cta { display: inline-block; background: #238636; color: #fff; font-weight: 600; border-radius: 8px; padding: 10px 20px; margin: 8px 8px 0 0; }
+  .cta:hover { background: #2ea043; text-decoration: none; }
+  .cta.ghost { background: transparent; border: 1px solid var(--border); }
+  .cta.ghost:hover { border-color: var(--accent); }
+  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Secular<span class="tm">™</span></h1>
+  <p class="tagline">License compliance scanning for your codebase — offline fingerprinting against the full SPDX catalog, a compatibility rules engine, and optional AI adjudication for custom licenses.</p>
+
+  <div class="badges">
+    <span>Node.js ≥ 18</span>
+    <span>Zero runtime dependencies</span>
+    <span>727 SPDX license texts</span>
+    <span>SARIF 2.1.0</span>
+    <span>Works offline</span>
+  </div>
+
+  <a class="cta" href="https://github.com/HahaAhhDev/secular">Source on GitHub</a>
+  <a class="cta ghost" href="#quickstart">Get started</a>
+
+  <h2>What it does</h2>
+  <div class="grid">
+    <div class="card"><h3>Fingerprint matching</h3><p>Normalizes and shingle-hashes license text, matching full files and inline headers against the SPDX catalog by containment similarity. Popularity priors disambiguate near-duplicate families.</p></div>
+    <div class="card"><h3>Rules engine</h3><p>Detects copyleft in proprietary code, network copyleft in service stacks, non-open licenses, weak-copyleft obligations, and missing NOTICE files.</p></div>
+    <div class="card"><h3>Manifest parsing</h3><p>Reads dependency lists from npm, Cargo, Go, PyPI, RubyGems, and Packagist manifests.</p></div>
+    <div class="card"><h3>CI-native output</h3><p>Terminal, JSON, Markdown, and SARIF 2.1.0 for GitHub Code Scanning. Meaningful exit codes and a <code>--strict</code> gate.</p></div>
+    <div class="card"><h3>AI adjudication</h3><p>Custom or non-SPDX license texts go to your LLM (OpenAI, Anthropic, OpenRouter, or local Ollama) and the classification folds back into the rules engine.</p></div>
+    <div class="card"><h3>Offline first</h3><p>The SPDX catalog is cached locally; scanning and scoring never need network access.</p></div>
+  </div>
+
+  <h2 id="quickstart">Quick start</h2>
+  <pre><code>git clone https://github.com/HahaAhhDev/secular.git
+cd secular
+npm install
+npm run build
+
+# Scan the current directory
+node dist/cli.js scan .
+
+# CI gate with SARIF output
+node dist/cli.js scan . -f sarif -o license.sarif --strict
+
+# Generate a THIRD-PARTY-NOTICES.md
+node dist/cli.js notice .
+
+# Classify custom licenses with AI
+node dist/cli.js ai . --api-key sk-ant-...</code></pre>
+
+  <h2>Rules &amp; severities</h2>
+  <table>
+    <tr><th>Rule</th><th>Severity</th><th>Trigger</th></tr>
+    <tr><td><code>COPYLEFT-IN-PROPRIETARY</code></td><td class="sev critical">critical</td><td>Strong copyleft (GPL) in a proprietary codebase</td></tr>
+    <tr><td><code>NETWORK-COPYLEFT</code></td><td class="sev critical">critical</td><td>AGPL/EUPL/OSL-style license in a network service</td></tr>
+    <tr><td><code>NON-OPEN-LICENSE</code></td><td class="sev critical">critical</td><td>SSPL, CC-BY-NC*, and other non-open licenses</td></tr>
+    <tr><td><code>PROJECT-LICENSE-CONFLICT</code></td><td class="sev error">error</td><td>Root LICENSE is copyleft but the project appears proprietary</td></tr>
+    <tr><td><code>PROJECT-LICENSE-UNFREE</code></td><td class="sev error">error</td><td>Root LICENSE restricts use</td></tr>
+    <tr><td><code>WEAK-COPYLEFT</code></td><td class="sev warning">warning</td><td>MPL, EPL, CDDL, LGPL — disclose modifications</td></tr>
+    <tr><td><code>UNKNOWN-LICENSE</code></td><td class="sev warning">warning</td><td>Unidentifiable license text — <code>secular ai</code> can classify it</td></tr>
+    <tr><td><code>MISSING-NOTICE</code></td><td class="sev info">info</td><td>Attribution licenses present but no NOTICE file</td></tr>
+  </table>
+
+  <h2>Compliance score</h2>
+  <p>A 0–100 score, penalized per finding: <strong>critical −30</strong>, <strong>error −15</strong>, <strong>warning −5</strong>, <strong>info −1</strong>. A clean scan scores 100; the score floors at 0.</p>
+
+  <h2>Exit codes</h2>
+  <table>
+    <tr><th>Code</th><th>Meaning</th></tr>
+    <tr><td><code>0</code></td><td>Clean — no findings at or above the threshold</td></tr>
+    <tr><td><code>1</code></td><td>Findings present (any with <code>--strict</code>, otherwise any critical)</td></tr>
+    <tr><td><code>2</code></td><td>Usage or IO error</td></tr>
+  </table>
+
+  <h2>Commands</h2>
+  <table>
+    <tr><th>Command</th><th>Description</th></tr>
+    <tr><td><code>secular scan [dir]</code></td><td>Scan a codebase (default)</td></tr>
+    <tr><td><code>secular ai [dir]</code></td><td>Scan + AI adjudication of custom/unknown licenses</td></tr>
+    <tr><td><code>secular notice [dir]</code></td><td>Generate THIRD-PARTY-NOTICES.md</td></tr>
+    <tr><td><code>secular cache --refresh</code></td><td>Force-refresh the SPDX catalog cache</td></tr>
+  </table>
+
+  <p>See the <a href="https://github.com/HahaAhhDev/secular#readme">full README</a> for every option, AI provider setup, environment variables, and troubleshooting.</p>
+
+  <footer>
+    Secular is detection and analysis tooling — findings are engineering guidance, not legal advice.<br>
+    Licensed under the Controlled Permissive License (HahaAhhDev-CPL-1.0).
+  </footer>
+</div>
+</body>
+</html>
