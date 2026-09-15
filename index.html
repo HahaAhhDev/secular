@@ -50,11 +50,12 @@
     <span>Zero runtime dependencies</span>
     <span>727 SPDX license texts</span>
     <span>SARIF 2.1.0</span>
-    <span>Works offline</span>
+    <span>Works offline — no API key for scanning</span>
   </div>
 
   <a class="cta" href="https://github.com/HahaAhhDev/secular">Source on GitHub</a>
   <a class="cta ghost" href="#quickstart">Get started</a>
+  <a class="cta ghost" href="https://github.com/HahaAhhDev/secular/pkgs/npm/@hahaahhdev%2Fsecular">GitHub Packages</a>
 
   <h2>What it does</h2>
   <div class="grid">
@@ -62,27 +63,30 @@
     <div class="card"><h3>Rules engine</h3><p>Detects copyleft in proprietary code, network copyleft in service stacks, non-open licenses, weak-copyleft obligations, and missing NOTICE files.</p></div>
     <div class="card"><h3>Manifest parsing</h3><p>Reads dependency lists from npm, Cargo, Go, PyPI, RubyGems, and Packagist manifests.</p></div>
     <div class="card"><h3>CI-native output</h3><p>Terminal, JSON, Markdown, and SARIF 2.1.0 for GitHub Code Scanning. Meaningful exit codes and a <code>--strict</code> gate.</p></div>
-    <div class="card"><h3>AI adjudication</h3><p>Custom or non-SPDX license texts go to your LLM (OpenAI, Anthropic, OpenRouter, or local Ollama) and the classification folds back into the rules engine.</p></div>
-    <div class="card"><h3>Offline first</h3><p>The SPDX catalog is cached locally; scanning and scoring never need network access.</p></div>
+    <div class="card"><h3>AI adjudication (optional)</h3><p>Custom or non-SPDX license texts go to your LLM (OpenAI, Anthropic, OpenRouter, or local Ollama) and the classification folds back into the rules engine. Requires an API key — plain scanning never does.</p></div>
+    <div class="card"><h3>Offline first</h3><p>The SPDX catalog is cached locally; scanning and scoring never need network access. A failed refresh falls back to the cached catalog.</p></div>
   </div>
 
   <h2 id="quickstart">Quick start</h2>
-  <pre><code>git clone https://github.com/HahaAhhDev/secular.git
-cd secular
-npm install
-npm run build
+  <pre><code># Install (one-time npm setup for GitHub Packages)
+github_token=$(gh auth token)   # or a PAT with read:packages
+npm config set @hahaahhdev:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken="$github_token"
+npm install -g @hahaahhdev/secular
 
-# Scan the current directory
-node dist/cli.js scan .
+# Scan any directory — no API key needed
+secular scan /path/to/project
 
 # CI gate with SARIF output
-node dist/cli.js scan . -f sarif -o license.sarif --strict
+secular scan /path/to/project -f sarif -o license.sarif --strict
 
 # Generate a THIRD-PARTY-NOTICES.md
-node dist/cli.js notice .
+secular notice /path/to/project
 
-# Classify custom licenses with AI
-node dist/cli.js ai . --api-key sk-ant-...</code></pre>
+# Classify custom licenses with AI (the only command needing a key)
+secular ai /path/to/project --api-key sk-ant-...</code></pre>
+
+  <p>An install script is also available for Linux/macOS — see the <a href="https://github.com/HahaAhhDev/secular#installation">README</a>.</p>
 
   <h2>Rules &amp; severities</h2>
   <table>
@@ -104,7 +108,7 @@ node dist/cli.js ai . --api-key sk-ant-...</code></pre>
   <table>
     <tr><th>Code</th><th>Meaning</th></tr>
     <tr><td><code>0</code></td><td>Clean — no findings at or above the threshold</td></tr>
-    <tr><td><code>1</code></td><td>Findings present (any with <code>--strict</code>, otherwise any critical)</td></tr>
+    <tr><td><code>1</code></td><td>Findings present (any at/above the threshold with <code>--strict</code>, otherwise any critical)</td></tr>
     <tr><td><code>2</code></td><td>Usage or IO error</td></tr>
   </table>
 
@@ -112,7 +116,7 @@ node dist/cli.js ai . --api-key sk-ant-...</code></pre>
   <table>
     <tr><th>Command</th><th>Description</th></tr>
     <tr><td><code>secular scan [dir]</code></td><td>Scan a codebase (default)</td></tr>
-    <tr><td><code>secular ai [dir]</code></td><td>Scan + AI adjudication of custom/unknown licenses</td></tr>
+    <tr><td><code>secular ai [dir]</code></td><td>Scan + AI adjudication of custom/unknown licenses (requires API key)</td></tr>
     <tr><td><code>secular notice [dir]</code></td><td>Generate THIRD-PARTY-NOTICES.md</td></tr>
     <tr><td><code>secular cache --refresh</code></td><td>Force-refresh the SPDX catalog cache</td></tr>
   </table>
