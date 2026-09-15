@@ -423,3 +423,68 @@ test("toNotices: empty third-party → placeholder", () => {
   const n = toNotices({ ...sampleReport, thirdParty: new Map() });
   assert.ok(n.includes("No third-party license files detected"));
 });
+
+// ---------- walker: exclude + symlinks ----------
+const { VENDOR_DIRS } = await import("../dist/walker.js");
+
+test("walk: exclude skips directories by name", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-exc-"));
+  fs.mkdirSync(path.join(dir, "skipme"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "keep"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "skipme", "a.ts"), "// x");
+  fs.writeFileSync(path.join(dir, "keep", "b.ts"), "// y");
+  const without = walk(dir).map((f: { rel: string }) => f.rel);
+  assert.ok(without.includes("skipme/a.ts"));
+  const withEx = walk(dir, 50_000, { exclude: ["skipme"] }).map((f: { rel: string }) => f.rel);
+  assert.ok(!withEx.includes("skipme/a.ts"));
+  assert.ok(withEx.includes("keep/b.ts"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("walk: symlink loops do not hang", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-loop-"));
+  fs.mkdirSync(path.join(dir, "inner"));
+  fs.writeFileSync(path.join(dir, "inner", "a.ts"), "// x");
+  try {
+    fs.symlinkSync(path.join(dir, "inner"), path.join(dir, "inner", "loop"), "dir");
+  } catch {
+    // Windows without privileges: skip
+  }
+  // Must terminate quickly instead of looping forever.
+  const files = walk(dir);
+  assert.ok(files.every((f: { rel: string }) => f.rel.split("/").filter((p) => p === "loop").length <= 2));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("walk: license files inside vendor dirs are found, vendor source is not", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-vendor-"));
+  fs.mkdirSync(path.join(dir, "vendor", "lib"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "vendor", "lib", "LICENSE"), "MIT License");
+  fs.writeFileSync(path.join(dir, "vendor", "lib", "code.js"), "module.exports = 1;");
+  const rels = walk(dir).map((f: { rel: string }) => f.rel);
+  assert.ok(rels.includes("vendor/lib/LICENSE"));
+  assert.ok(!rels.includes("vendor/lib/code.js"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---------- report: color toggle + json extras ----------
+test("terminal: --no-color produces no ANSI escape codes", async () => {
+  const { terminal } = await import("../dist/report.js");
+  const plain = terminal(sampleReport, { color: false });
+  assert.ok(!plain.includes("\x1b["), "no escape codes expected");
+  const colored = terminal(sampleReport, { color: true });
+  assert.ok(colored.includes("\x1b["), "escape codes expected with color on");
+});
+
+test("toJson: includeLicenseFiles adds per-file data", async () => {
+  const { toJson } = await import("../dist/report.js");
+  const r = { ...sampleReport, licenseFiles: [{ file: "LICENSE", matches: [], id: "MIT", score: 1, excerpt: "x" }] };
+  const without = JSON.parse(toJson(r));
+  assert.ok(!("licenseFiles" in without));
+  const withFiles = JSON.parse(toJson(r, { includeLicenseFiles: true }));
+  assert.equal(withFiles.licenseFiles[0].license, "MIT");
+  assert.equal(withFiles.licenseFiles[0].file, "LICENSE");
+});

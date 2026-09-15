@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * secular — elite AI-powered license compliance scanning.
+ * secular — license compliance scanning with optional AI adjudication.
  *
  *   secular scan [dir]            Scan a codebase
  *   secular notice [dir]          Generate THIRD-PARTY-NOTICES.md
@@ -12,11 +12,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { scan, buildContext } from "./scan.js";
-import { evaluate, complianceScore } from "./rules.js";
+import { evaluate, complianceScore, severityRank, type Severity } from "./rules.js";
 import { adjudicate, resolveAiConfig, type Adjudication } from "./ai.js";
 import { getMeta } from "./meta.js";
 import { terminal, toJson, toMarkdown, toSarif, toNotices } from "./report.js";
 import { loadCatalog } from "./spdx.js";
+import { fileURLToPath } from "node:url";
+
+const VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version as string;
+  } catch {
+    return "1.0.0";
+  }
+})();
 
 interface Args {
   command: string;
@@ -28,19 +37,22 @@ interface Args {
   baseUrl?: string;
   output?: string;
   minSeverity?: string;
+  failOnRule?: string[];
+  exclude?: string[];
   refresh?: boolean;
   strict?: boolean;
+  noColor?: boolean;
+  includeLicenseFiles?: boolean;
 }
 
-import { fileURLToPath } from "node:url";
+const SEV_ORDER = ["info", "warning", "error", "critical"];
 
-const VERSION = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version as string;
-  } catch {
-    return "1.0.0";
-  }
-})();
+/** Rules the rules engine can emit, for --fail-on-rule validation. */
+const KNOWN_RULES = new Set([
+  "COPYLEFT-IN-PROPRIETARY", "NETWORK-COPYLEFT", "NON-OPEN-LICENSE",
+  "PROJECT-LICENSE-CONFLICT", "PROJECT-LICENSE-UNFREE", "WEAK-COPYLEFT",
+  "UNKNOWN-LICENSE", "MISSING-NOTICE",
+]);
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
@@ -104,6 +116,30 @@ function parseArgs(argv: string[]): Args {
         args.minSeverity = sev;
         break;
       }
+      case "--fail-on-rule": {
+        const rule = shiftValue(a).toUpperCase();
+        if (!KNOWN_RULES.has(rule)) {
+          console.error(`error: --fail-on-rule must be one of: ${[...KNOWN_RULES].join(", ")}`);
+          process.exit(2);
+        }
+        (args.failOnRule ??= []).push(rule);
+        break;
+      }
+      case "--exclude": {
+        const dir = shiftValue(a);
+        if (!dir.trim()) {
+          console.error("error: --exclude requires a directory name");
+          process.exit(2);
+        }
+        (args.exclude ??= []).push(dir);
+        break;
+      }
+      case "--json-include-license-files":
+        args.includeLicenseFiles = true;
+        break;
+      case "--no-color":
+        args.noColor = true;
+        break;
       case "--refresh":
         args.refresh = true;
         break;
@@ -119,13 +155,13 @@ function parseArgs(argv: string[]): Args {
         console.log(`secular ${VERSION}`);
         process.exit(0);
       default:
-        if (!a.startsWith("--") && !a.startsWith("-")) {
+        if (!a.startsWith("-")) {
           if (!fs.existsSync(a)) {
             console.error(`error: directory not found: ${a}`);
             process.exit(2);
           }
           args.dir = a;
-        } else if (a.startsWith("-")) {
+        } else {
           console.error(`error: unknown option: ${a} (see --help)`);
           process.exit(2);
         }
@@ -137,7 +173,7 @@ function parseArgs(argv: string[]): Args {
 
 function printHelp(): void {
   console.log(`
-${"\u001b[1m"}secular${"\u001b[0m"} — elite AI-powered license compliance scanning
+${"\u001b[1m"}secular${"\u001b[0m"} — license compliance scanning (v${VERSION})
 
 ${"\u001b[1m"}USAGE${"\u001b[0m"}
   secular <command> [dir] [options]
@@ -156,7 +192,11 @@ ${"\u001b[1m"}OPTIONS${"\u001b[0m"}
   -f, --format <fmt>      terminal | json | markdown | sarif
   -o, --output <file>     Write report to a file
       --min-severity <s>  Filter: info | warning | error | critical
-      --strict            Exit non-zero on any finding (CI mode)
+      --fail-on-rule <r>  Exit 1 if a finding matches this rule (repeatable)
+      --exclude <dir>     Skip a directory by name (repeatable)
+      --strict            Exit 1 on any finding at/above the threshold
+      --no-color          Disable colored terminal output
+      --json-include-license-files  Include per-file license matches in JSON
       --refresh           Force SPDX catalog refresh
   -h, --help              Show help
   -v, --version           Show version
@@ -166,10 +206,10 @@ ${"\u001b[1m"}EXAMPLES${"\u001b[0m"}
   secular ai . --api-key sk-...           # scan + AI adjudication
   secular scan . -f sarif -o secular.sarif
   secular scan . --strict && npm test     # CI gate
+  secular scan . --fail-on-rule NETWORK-COPYLEFT
+  secular scan . --exclude test --exclude fixtures
 `);
 }
-
-const SEV_ORDER = ["info", "warning", "error", "critical"];
 
 /** Write output to a file with a friendly error if the path is unwritable. */
 function writeOutput(out: string, file: string): void {
@@ -182,11 +222,22 @@ function writeOutput(out: string, file: string): void {
   }
 }
 
+/** True when running in a terminal and colors were not disabled. */
+function useColor(noColor?: boolean): boolean {
+  if (noColor) return false;
+  if (process.env.FORCE_COLOR && process.env.FORCE_COLOR !== "0") return true;
+  if (process.env.NO_COLOR) return false;
+  return Boolean(process.stdout.isTTY);
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.command === "cache") {
-    const cat = await loadCatalog({ refresh: true });
+    // With --refresh: always refetch. Without: only fetch if no fresh cache
+    // (loadCatalog's TTL handles it) — a bare `secular cache` must not hit
+    // the network when the cache is current.
+    const cat = await loadCatalog({ refresh: args.refresh === true });
     console.log(`SPDX catalog v${cat.licenseListVersion} — ${cat.licenses.length} licenses cached.`);
     return 0;
   }
@@ -198,7 +249,7 @@ async function main(): Promise<number> {
   }
 
   if (args.command === "notice") {
-    const report = await scan({ root: args.dir, refreshCatalog: args.refresh });
+    const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude });
     const notices = toNotices(report);
     const out = args.output ?? "THIRD-PARTY-NOTICES.md";
     writeOutput(notices, out);
@@ -220,7 +271,7 @@ async function main(): Promise<number> {
     }
   }
 
-  const report = await scan({ root: args.dir, refreshCatalog: args.refresh });
+  const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude });
   report.usedAi = useAi;
 
   // AI adjudication of unknown / low-confidence licenses. Applies when the
@@ -269,18 +320,19 @@ async function main(): Promise<number> {
     report.score = complianceScore(report.findings);
   }
 
-  // Severity filter.
+  // Severity filter (affects both report and exit-code decisions).
   if (args.minSeverity) {
     const min = SEV_ORDER.indexOf(args.minSeverity);
     if (min >= 0) report.findings = report.findings.filter((f) => SEV_ORDER.indexOf(f.severity) >= min);
   }
 
   let out: string;
+  (globalThis as { __SECULAR_VERSION__?: string }).__SECULAR_VERSION__ = VERSION;
   switch (args.format) {
-    case "json": out = toJson(report); break;
+    case "json": out = toJson(report, { includeLicenseFiles: args.includeLicenseFiles }); break;
     case "markdown": out = toMarkdown(report); break;
     case "sarif": out = toSarif(report); break;
-    default: out = terminal(report);
+    default: out = terminal(report, { color: useColor(args.noColor) });
   }
 
   if (args.output) {
@@ -289,9 +341,15 @@ async function main(): Promise<number> {
     console.log(out);
   }
 
+  // ---- Exit-code logic ----
+  // 1) --strict: any finding at/above threshold fails (minSeverity already
+  //    applied to report.findings).
   if (args.strict && report.findings.length > 0) return 1;
-  const hasCritical = report.findings.some((f) => f.severity === "critical");
-  return hasCritical ? 1 : 0;
+  // 2) --fail-on-rule: named rules fail regardless of severity.
+  if (args.failOnRule?.length && report.findings.some((f) => args.failOnRule!.includes(f.rule))) return 1;
+  // 3) Default: any critical finding fails.
+  if (report.findings.some((f) => f.severity === "critical")) return 1;
+  return 0;
 }
 
 // ---- Global error handling ------------------------------------------------

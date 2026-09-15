@@ -32,7 +32,20 @@ const SEV_ICON: Record<Severity, string> = {
   info: "\u2139",
 };
 
-export function terminal(r: ScanReport): string {
+type Palette = typeof C;
+
+/** Colors disabled → every code becomes the empty string. */
+function palette(color: boolean): Palette {
+  if (color) return C;
+  return new Proxy(C, { get: () => "" }) as Palette;
+}
+
+export function terminal(r: ScanReport, opts: { color?: boolean } = {}): string {
+  const C = palette(opts.color !== false);
+  return terminalBody(r, C);
+}
+
+function terminalBody(r: ScanReport, C: Palette): string {
   const L: string[] = [];
   L.push(`${C.bold}Secular\u2122 \u2014 license compliance report${C.reset}`);
   L.push(`${C.gray}${r.root}${C.reset}`);
@@ -75,8 +88,14 @@ export function terminal(r: ScanReport): string {
   if (r.findings.length) {
     L.push(`${C.bold}Findings${C.reset} (${r.findings.length})`);
     const sorted = [...r.findings].sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+    const sevColor: Record<Severity, string> = {
+      critical: C.red,
+      error: C.red,
+      warning: C.yellow,
+      info: C.cyan,
+    };
     for (const f of sorted) {
-      L.push(`  ${SEV_COLOR[f.severity]}${SEV_ICON[f.severity]} [${f.severity.toUpperCase()}]${C.reset} ${C.bold}${f.title}${C.reset}`);
+      L.push(`  ${sevColor[f.severity]}${SEV_ICON[f.severity]} [${f.severity.toUpperCase()}]${C.reset} ${C.bold}${f.title}${C.reset}`);
       L.push(`    ${C.dim}${f.rule}${f.file ? ` \u00b7 ${f.file}` : ""}${C.reset}`);
       L.push(`    ${f.detail}`);
       L.push(`    ${C.green}\u2192 ${f.remediation}${C.reset}`);
@@ -90,11 +109,11 @@ export function terminal(r: ScanReport): string {
   return L.join("\n");
 }
 
-export function toJson(r: ScanReport): string {
+export function toJson(r: ScanReport, opts: { includeLicenseFiles?: boolean } = {}): string {
   return JSON.stringify(
     {
       tool: "secular",
-      version: "1.0.0",
+      version: (globalThis as { __SECULAR_VERSION__?: string }).__SECULAR_VERSION__ ?? "1.1.0",
       root: r.root,
       filesScanned: r.filesScanned,
       score: r.score,
@@ -105,6 +124,16 @@ export function toJson(r: ScanReport): string {
         [...r.thirdParty.entries()].map(([id, v]) => [id, { category: v.category, files: v.files }])
       ),
       dependencyCount: r.dependencies.length,
+      dependencies: r.dependencies.map((d) => ({ name: d.name, scope: d.scope, ecosystem: d.ecosystem, source: d.source })),
+      ...(opts.includeLicenseFiles
+        ? {
+            licenseFiles: r.licenseFiles.map((h) => ({
+              file: h.file,
+              license: h.id ?? null,
+              confidence: h.score ?? null,
+            })),
+          }
+        : {}),
       findings: r.findings,
     },
     null,

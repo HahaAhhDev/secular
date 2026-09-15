@@ -44,6 +44,10 @@ export interface ScanOptions {
   refreshCatalog?: boolean;
   /** Proprietary assumption — defaults to heuristic. */
   proprietary?: boolean;
+  /** Directory names to skip entirely during the walk. */
+  exclude?: string[];
+  /** Max license files sent for AI adjudication (ai command). */
+  maxAdjudicate?: number;
 }
 
 export async function scan(opts: ScanOptions): Promise<ScanReport> {
@@ -64,7 +68,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
   const deprecatedIds = new Set(catalog.licenses.filter((l) => l.isDeprecatedLicenseId).map((l) => l.licenseId));
   const index = buildIndex(catalog);
 
-  const files = walk(root);
+  const files = walk(root, 50_000, { exclude: opts.exclude });
   const licenseFiles: LicenseHit[] = [];
   const rootLicenses = new Map<string, { category: Category; file?: string }>();
   const projectLicenses = new Map<string, { category: Category; file?: string }>();

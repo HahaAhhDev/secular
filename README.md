@@ -86,7 +86,7 @@ secular cache --refresh            # refresh the SPDX catalog cache
 | `scan [dir]` | Scan a codebase (default command). |
 | `ai [dir]` | Scan + AI adjudication. Classifies custom/unknown license texts via your LLM. Needs `--api-key` or `SECULAR_API_KEY`/`OPENAI_API_KEY`. |
 | `notice [dir]` | Generate a `THIRD-PARTY-NOTICES.md` from detected third-party licenses. |
-| `cache --refresh` | Force-refresh the SPDX catalog cache. |
+| `cache --refresh` | Refresh the SPDX catalog cache. Without `--refresh`, reports the cached catalog (fetches only if none exists). |
 
 ## Options
 
@@ -99,6 +99,10 @@ secular cache --refresh            # refresh the SPDX catalog cache
 | `-f, --format <fmt>` | `terminal` \| `json` \| `markdown` \| `sarif` |
 | `-o, --output <file>` | Write the report to a file |
 | `--min-severity <sev>` | Only report findings at or above: `info` \| `warning` \| `error` \| `critical` |
+| `--fail-on-rule <rule>` | Exit 1 when a finding matches this rule, regardless of severity. Repeatable. Rules: `COPYLEFT-IN-PROPRIETARY`, `NETWORK-COPYLEFT`, `NON-OPEN-LICENSE`, `PROJECT-LICENSE-CONFLICT`, `PROJECT-LICENSE-UNFREE`, `WEAK-COPYLEFT`, `UNKNOWN-LICENSE`, `MISSING-NOTICE` |
+| `--exclude <dir>` | Skip a directory by name at any depth (repeatable, case-insensitive) |
+| `--no-color` | Disable colored terminal output (auto-disabled when output is not a terminal; respects `NO_COLOR` / `FORCE_COLOR`) |
+| `--json-include-license-files` | Include per-file license matches with confidence in JSON output |
 | `--strict` | Exit non-zero if any finding exists at or above the threshold (CI gate) |
 | `--refresh` | Force SPDX catalog refresh before scanning |
 | `-h, --help` / `-v, --version` | Help / version |

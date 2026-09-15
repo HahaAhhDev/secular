@@ -45,13 +45,30 @@ const SOURCE_EXT = new Set([
   ".erl", ".hrl", ".clj", ".cljs", ".scala", ".dart", ".zig", ".vue", ".svelte",
 ]);
 
-export function walk(root: string, maxFiles = 50_000): FoundFile[] {
+export interface WalkOptions {
+  /** Directory names (any depth) to skip entirely. Case-insensitive. */
+  exclude?: string[];
+}
+
+function shouldExclude(name: string, exclude?: string[]): boolean {
+  if (!exclude?.length) return false;
+  const lower = name.toLowerCase();
+  return exclude.some((e) => {
+    const el = e.toLowerCase();
+    // "foo" matches the directory foo; "foo/" also accepted for convenience
+    return lower === el.replace(/\/+$/, "");
+  });
+}
+
+export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): FoundFile[] {
   const out: FoundFile[] = [];
+  // Visited real paths guard against symlink loops (a→b→a).
+  const visited = new Set<string>([fs.realpathSync.native(root)]);
   // Queue entries carry the vendor context: inside a vendor dir we collect
   // license files only.
-  const queue: { dir: string; inVendor: boolean }[] = [{ dir: root, inVendor: false }];
+  const queue: { dir: string; rel: string; inVendor: boolean }[] = [{ dir: root, rel: "", inVendor: false }];
   while (queue.length && out.length < maxFiles) {
-    const { dir, inVendor } = queue.shift()!;
+    const { dir, rel: parentRel, inVendor } = queue.shift()!;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -59,19 +76,41 @@ export function walk(root: string, maxFiles = 50_000): FoundFile[] {
       continue;
     }
     for (const e of entries) {
-      const abs = path.join(dir, e.name);
-      if (e.isDirectory()) {
-        if (SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue;
-        queue.push({ dir: abs, inVendor: inVendor || VENDOR_DIRS.has(e.name) });
+      const rel = parentRel ? `${parentRel}/${e.name}` : e.name;
+      if (e.isDirectory() || e.isSymbolicLink()) {
+        const abs = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue;
+          if (shouldExclude(e.name, opts.exclude)) continue;
+        } else {
+          // Symlink: follow only when it points at a directory.
+          let st: fs.Stats;
+          try {
+            st = fs.statSync(abs);
+          } catch {
+            continue; // broken symlink
+          }
+          if (!st.isDirectory()) continue;
+          if (SKIP_DIRS.has(e.name) || e.name.startsWith(".") || shouldExclude(e.name, opts.exclude)) continue;
+        }
+        // Symlink loop guard: resolve and skip already-visited directories.
+        let real: string;
+        try {
+          real = fs.realpathSync.native(abs);
+        } catch {
+          continue; // unreadable / broken symlink
+        }
+        if (visited.has(real)) continue;
+        visited.add(real);
+        queue.push({ dir: abs, rel, inVendor: inVendor || VENDOR_DIRS.has(e.name) });
         continue;
       }
       if (!e.isFile()) continue;
-      const rel = path.relative(root, abs);
       const base = e.name;
-      if (LICENSE_FILE_RE.test(base)) out.push({ abs, rel, kind: "license" });
+      if (LICENSE_FILE_RE.test(base)) out.push({ abs: path.join(dir, base), rel, kind: "license" });
       else if (inVendor) continue; // vendor source code: skip
-      else if (isManifest(base)) out.push({ abs, rel, kind: "manifest" });
-      else if (SOURCE_EXT.has(path.extname(e.name))) out.push({ abs, rel, kind: "source" });
+      else if (isManifest(base)) out.push({ abs: path.join(dir, base), rel, kind: "manifest" });
+      else if (SOURCE_EXT.has(path.extname(base))) out.push({ abs: path.join(dir, base), rel, kind: "source" });
     }
   }
   return out;
