@@ -6,3 +6,4 @@ dist/
 .env.*
 secular.sarif
 THIRD-PARTY-NOTICES.md
+dist-test/
