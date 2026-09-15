@@ -19,6 +19,21 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 Requires Node.js ≥ 18.
 
+**GitHub Packages** (published as `@hahaahhdev/secular`):
+
+```bash
+# One-time setup: authenticate npm against GitHub Packages
+github_token=$(gh auth token)   # or a PAT with read:packages
+npm config set @hahaahhdev:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken="$github_token"
+
+# Then install globally
+npm install -g @hahaahhdev/secular
+secular --version
+```
+
+> GitHub Packages requires authentication for installs, so this two-line npm config is needed once per machine.
+
 **Install script** (Linux/macOS) — clones, builds, and puts `secular` on your PATH:
 
 ```bash
@@ -56,7 +71,7 @@ secular ai . --api-key sk-ant-...  # + AI adjudication of custom licenses
 secular cache --refresh            # refresh the SPDX catalog cache
 ```
 
-`secular` works from any directory — pass the target project's path as the first argument (`secular scan /path/to/project`).
+`secular` works from any directory — pass the target project's path as the first argument (`secular scan /path/to/project`). Global installs give you the `secular` command everywhere; `npx @hahaahhdev/secular scan .` works too.
 
 ## Commands
 

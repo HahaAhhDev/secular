@@ -1,5 +1,5 @@
 {
-  "name": "secular",
+  "name": "@hahaahhdev/secular",
   "version": "1.0.0",
   "description": "Elite AI-powered license compliance scanning for codebases. Enter an API key, get world-class LICENSE violation detection.",
   "type": "module",
