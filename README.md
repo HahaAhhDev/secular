@@ -1,16 +1,20 @@
 # Secular™
 
-**Elite AI-powered license compliance scanning for your codebase.**
+**AI-powered license compliance scanning for your codebase.**
 
-Point Secular at any repository and get a complete license compliance report in seconds: every license detected by **full-text fingerprinting** against the SPDX catalog, violations ranked by severity, and a 0–100 compliance score. Add an API key and Secular's AI layer adjudicates even custom and unknown license texts.
+Point Secular at any repository and get a complete license compliance report: every license detected by **full-text fingerprinting** against the SPDX catalog, violations ranked by severity, and a 0–100 compliance score. Add an API key and Secular's AI layer adjudicates even custom and unknown license texts.
+
+> **Status:** early release. Secular is not yet published to npm — for now, install from source (below).
+
+Real output from a real scan of a test repository:
 
 ```text
-$ npx secular ai . --api-key sk-ant-...
+$ node dist/cli.js scan ./my-project
 
 Secular™ — license compliance report
-/home/you/my-project
+/tmp/fixture
 
-Scanned 1,204 files · SPDX catalog vspdx-license-list@6 (727 texts) · AI adjudication ✓
+Scanned 3 files · SPDX catalog vspdx-license-list@6 (727 texts)
 
   Compliance score: 70/100
 
@@ -62,63 +66,66 @@ Findings (1)
 | **Analysis** | Compatibility rules engine: copyleft strength, network copyleft (AGPL), non-open licenses, NOTICE obligations | Flat list of licenses found |
 | **Context awareness** | Detects network-service stacks (Express, FastAPI, Gin, …) and escalates AGPL-style risk accordingly | None |
 | **Output** | Terminal, JSON, Markdown, **SARIF 2.1.0** (GitHub Code Scanning native) | Plain text |
-| **Runtime dependencies** | **Zero** — one Node binary, SPDX data cached locally | Heavy dependency trees |
+| **Runtime dependencies** | **Zero** — one Node CLI, SPDX data cached locally | Heavy dependency trees |
 | **CI** | `--strict` gate, meaningful exit codes, SARIF upload | Varies |
 | **Offline** | Rules engine + fingerprinting work fully offline | Often requires registry access |
 
 ## Installation
 
-Requires **Node.js ≥ 18**.
+Requires **Node.js ≥ 18**. Secular is currently **install from source** (not yet on npm):
 
 ```bash
-# Run directly (no install)
-npx secular scan .
-
-# Or install globally
-npm install -g secular
-
-# Or clone and build from source
 git clone https://github.com/HahaAhhDev/secular.git
-cd secular && npm install && npm run build
-node dist/cli.js scan .
+cd secular
+npm install        # dev dependencies only: TypeScript + Node type defs
+npm run build      # compiles TypeScript → dist/
+```
+
+That's it. Run the CLI with:
+
+```bash
+node dist/cli.js scan /path/to/repo
+
+# Optional: create a short alias for convenience
+alias secular='node /path/to/secular/dist/cli.js'
 ```
 
 ## Quick start
 
 ```bash
 # 1. Plain scan — no API key needed
-secular scan .
+node dist/cli.js scan .
 
 # 2. Scan with AI adjudication for unknown/custom licenses
-secular ai . --api-key sk-...
+node dist/cli.js ai . --api-key sk-ant-...
 
 # 3. CI gate with SARIF output for GitHub Code Scanning
-secular scan . -f sarif -o license.sarif --strict
+node dist/cli.js scan . -f sarif -o license.sarif --strict
 
 # 4. Generate a THIRD-PARTY-NOTICES file for your distribution
-secular notice . -o THIRD-PARTY-NOTICES.md
+node dist/cli.js notice . -o THIRD-PARTY-NOTICES.md
 
 # 5. Refresh the local SPDX catalog
-secular cache --refresh
+node dist/cli.js cache --refresh
 ```
 
 ## Commands
 
-### `secular scan [dir]`
+### `scan [dir]`
 
-Scans a directory for license violations. Default command — `secular` with no arguments scans the current directory.
+Scans a directory for license violations. Default command — running with no subcommand scans the current directory.
 
-### `secular ai [dir]`
+### `ai [dir]`
 
 Everything `scan` does, plus AI adjudication. Any license file or inline header that the fingerprinter can't confidently match (or matches below 90%) is sent to your configured LLM for classification. Adjudicated licenses are folded back into the rules engine, so findings and the compliance score update automatically.
 
 Requires `--api-key` or `SECULAR_API_KEY`/`OPENAI_API_KEY`.
 
-### `secular notice [dir]`
+### `notice [dir]`
 
 Generates a `THIRD-PARTY-NOTICES.md` (or a path you choose with `-o`) listing every third-party license discovered, ready to ship with your distribution.
 
-### `secular cache --refresh`
+### `cache --refresh`
 
 Forces a refresh of the local SPDX license catalog (727 license texts). The cache lives in `~/.secular/spdx` and auto-refreshes weekly; use this to force it sooner.
 
@@ -153,16 +160,16 @@ Any OpenAI-compatible endpoint works via `--base-url` (vLLM, LM Studio, Azure Op
 
 ```bash
 # Anthropic, auto-detected from the key
-secular ai . --api-key sk-ant-...
+node dist/cli.js ai . --api-key sk-ant-...
 
 # Explicit provider + model
-secular ai . --provider anthropic --model claude-sonnet-4-20250514 --api-key sk-ant-...
+node dist/cli.js ai . --provider anthropic --model claude-sonnet-4-20250514 --api-key sk-ant-...
 
 # Local Ollama — no API key needed, just a running server
-secular ai . --provider ollama
+node dist/cli.js ai . --provider ollama
 
 # Any OpenAI-compatible endpoint
-secular ai . --base-url http://localhost:8080/v1 --model my-model --api-key local
+node dist/cli.js ai . --base-url http://localhost:8080/v1 --model my-model --api-key local
 ```
 
 ## Exit codes & CI usage
@@ -174,6 +181,8 @@ secular ai . --base-url http://localhost:8080/v1 --model my-model --api-key loca
 | `2` | Usage/IO error (bad arguments, missing directory, unwritable output, AI config missing) |
 
 ### GitHub Actions example
+
+Since Secular isn't on npm yet, check it out and build in CI:
 
 ```yaml
 name: license-compliance
@@ -187,7 +196,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npx secular scan . -f sarif -o license.sarif --strict
+      - name: Build secular
+        run: |
+          git clone https://github.com/HahaAhhDev/secular.git /tmp/secular
+          cd /tmp/secular && npm install && npm run build
+      - name: Scan
+        run: /tmp/secular/dist/cli.js scan . -f sarif -o license.sarif --strict
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -199,8 +213,8 @@ The SARIF upload makes every finding appear directly in GitHub's **Security → 
 ### Plain CI gate
 
 ```bash
-secular scan . --strict          # fails on ANY finding
-secular scan . --strict --min-severity error   # fails only on error/critical
+node dist/cli.js scan . --strict          # fails on ANY finding
+node dist/cli.js scan . --strict --min-severity error   # fails only on error/critical
 ```
 
 ## What it detects
@@ -241,7 +255,7 @@ The score floors at 0. A clean scan is 100; a single GPL-in-proprietary finding 
 ## How detection works
 
 1. **Walk** — traverses the repository, skipping `node_modules`, `.git`, `dist`, `build`, `vendor`, and other artifact directories.
-2. **Fingerprint** — every license file and source-file header is normalized (lowercased, copyright years and placeholders stripped, punctuation removed), hashed into 8-word shingles, and matched against the SPDX catalog by containment similarity. **Ties break by text-length similarity**, so plain `MIT` correctly beats superset lookalikes like `FSL-1.1-MIT` or `X11`.
+2. **Fingerprint** — every license file and source-file header is normalized (lowercased, copyright years and placeholders stripped, punctuation removed), hashed into 8-word shingles, and matched against the SPDX catalog by containment similarity. Ties break by **text-length similarity**, so plain `MIT` correctly beats superset lookalikes like `FSL-1.1-MIT` or `X11`. Root LICENSE files demand ≥90% confidence and reject partial-text matches; sub-threshold files stay unclassified rather than guessing wrong.
 3. **Parse manifests** — extracts the dependency surface per ecosystem.
 4. **Evaluate** — the rules engine combines licenses, project context (root license, network-service heuristics, notice files), and produces ranked findings.
 5. **Adjudicate** *(optional)* — ambiguous licenses go to the LLM; confident classifications are merged back and rules re-run.
@@ -250,11 +264,11 @@ The score floors at 0. A clean scan is 100; a single GPL-in-proprietary finding 
 ## Output formats
 
 ```bash
-secular scan .                      # human-readable terminal report (default)
-secular scan . -f json              # machine-readable JSON (full report)
-secular scan . -f markdown          # GitHub-friendly Markdown report
-secular scan . -f sarif             # SARIF 2.1.0 for GitHub Code Scanning
-secular scan . -f json -o out.json  # any format can be written to a file
+node dist/cli.js scan .                      # human-readable terminal report (default)
+node dist/cli.js scan . -f json              # machine-readable JSON (full report)
+node dist/cli.js scan . -f markdown          # GitHub-friendly Markdown report
+node dist/cli.js scan . -f sarif             # SARIF 2.1.0 for GitHub Code Scanning
+node dist/cli.js scan . -f json -o out.json  # any format can be written to a file
 ```
 
 JSON includes every field the terminal report shows (license maps, dependencies, findings, score) plus the SPDX catalog version — suitable for building dashboards or tracking compliance over time.
@@ -273,7 +287,7 @@ JSON includes every field the terminal report shows (license maps, dependencies,
 
 - The SPDX catalog (727 license texts) is fetched once and cached at `~/.secular/spdx/licenses.json`.
 - The cache is refreshed automatically if older than **1 week**.
-- `secular cache --refresh` forces an immediate refresh.
+- `node dist/cli.js cache --refresh` forces an immediate refresh.
 - If a fetch fails but a cache exists, the **stale cache is used** — scanning always works offline once primed.
 - The rules engine and fingerprinting never need network access; only AI adjudication does.
 
@@ -312,15 +326,15 @@ src/
 
 ## Troubleshooting
 
-**`Could not fetch SPDX catalog and no local cache exists`** — run `secular cache --refresh` once with network access, or check proxy settings. After the first successful fetch, scanning works offline.
+**`Could not fetch SPDX catalog and no local cache exists`** — run `node dist/cli.js cache --refresh` once with network access, or check proxy settings. After the first successful fetch, scanning works offline.
 
-**License shows as "Unknown"** — the text didn't match any SPDX entry closely enough. Run `secular ai .` with an API key; the AI layer classifies custom licenses. Alternatively, add the correct `SPDX-License-Identifier` header to the source files.
+**License shows as "Unknown"** — the text didn't match any SPDX entry closely enough (this is intentional for truncated or heavily modified texts — Secular won't guess). Run `node dist/cli.js ai .` with an API key; the AI layer classifies custom licenses. Alternatively, add the correct `SPDX-License-Identifier` header to the source files.
 
 **False copyleft warnings from a single header** — Secular treats inline `SPDX-License-Identifier` tags as intentional license declarations. Fix the header on the affected file.
 
 **API adjudication fails with 401/403** — check the key and that `--provider` matches your key's provider. `sk-ant-...` keys route to Anthropic automatically; other prefixes default to OpenAI.
 
-**Score lower than expected** — check for `info` findings (MISSING-NOTICE); each costs 1 point. Run `secular notice .` to clear them.
+**Score lower than expected** — check for `info` findings (MISSING-NOTICE); each costs 1 point. Run `node dist/cli.js notice .` to clear them.
 
 ## Legal note
 
