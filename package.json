@@ -33,7 +33,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --experimental-strip-types --no-warnings --test test/detect.test.ts",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/detect.test.js",
+    "posttest": "node -e \"require('fs').rmSync('dist-test',{recursive:true,force:true})\"",
     "prepublishOnly": "npm run build",
     "secular": "node dist/cli.js"
   },

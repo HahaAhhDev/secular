@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-test",
+    "rootDir": "test",
+    "noEmit": false,
+    // Transpile-only: tests need to compile to JS, not be type-checked
+    // (their fixtures use plain strings for enum-like fields).
+    "isolatedModules": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true
+  },
+  "include": ["test"]
+}

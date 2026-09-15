@@ -23,7 +23,7 @@ const LICENSES_URL = "https://cdn.jsdelivr.net/npm/spdx-license-list@6/spdx-full
 const cat = await (await fetch(LICENSES_URL)).json();
 const catalog = {
   licenseListVersion: "test",
-  licenses: Object.entries(cat).map(([licenseId, e]) => ({
+  licenses: Object.entries(cat).map(([licenseId, e]: [string, { name: string; licenseText: string; deprecated?: boolean }]) => ({
     licenseId,
     name: e.name,
     licenseText: e.licenseText,
@@ -118,7 +118,7 @@ test("getMeta: SSPL is unfree", () => {
 });
 
 test("categoryLabel covers all categories", () => {
-  for (const c of ["public-domain", "permissive", "weak-copyleft", "strong-copyleft", "network-copyleft", "unfree", "unknown"]) {
+  for (const c of ["public-domain", "permissive", "weak-copyleft", "strong-copyleft", "network-copyleft", "unfree", "unknown"] as const) {
     assert.ok(categoryLabel(c).length > 0);
   }
 });
@@ -226,12 +226,12 @@ test("complianceScore: clean → 100", () => {
 });
 
 test("complianceScore: one critical → 70", () => {
-  const f = [{ rule: "X", severity: "critical", title: "t", detail: "d", remediation: "r" }];
+  const f = [{ rule: "X", severity: "critical" as const, title: "t", detail: "d", remediation: "r" }];
   assert.equal(complianceScore(f), 70);
 });
 
 test("complianceScore: floors at 0", () => {
-  const f = Array.from({ length: 5 }, () => ({ rule: "X", severity: "critical", title: "t", detail: "d", remediation: "r" }));
+  const f = Array.from({ length: 5 }, () => ({ rule: "X", severity: "critical" as const, title: "t", detail: "d", remediation: "r" }));
   assert.equal(complianceScore(f), 0);
 });
 
@@ -358,7 +358,9 @@ test("resolveAiConfig: unknown provider falls back to openai", () => {
 });
 
 // ---------- report ----------
-const sampleReport = {
+// Typed as any-shaped fixture: report emitters accept ScanReport; the test
+// fixtures use plain strings for enum-like fields.
+const sampleReport: any = {
   root: "/tmp/x",
   filesScanned: 3,
   licenseFiles: [],
