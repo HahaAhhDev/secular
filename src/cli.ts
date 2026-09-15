@@ -14,6 +14,7 @@ import path from "node:path";
 import { scan, buildContext } from "./scan.js";
 import { evaluate, complianceScore } from "./rules.js";
 import { adjudicate, resolveAiConfig, type Adjudication } from "./ai.js";
+import { getMeta } from "./meta.js";
 import { terminal, toJson, toMarkdown, toSarif, toNotices } from "./report.js";
 import { loadCatalog } from "./spdx.js";
 
@@ -222,9 +223,13 @@ async function main(): Promise<number> {
   const report = await scan({ root: args.dir, refreshCatalog: args.refresh });
   report.usedAi = useAi;
 
-  // AI adjudication of unknown / low-confidence licenses.
+  // AI adjudication of unknown / low-confidence licenses. Applies when the
+  // fingerprinter found nothing, matched below 90%, or the matched id has no
+  // known category (custom/non-SPDX licenses) — the AI still classifies them.
   if (aiCfg) {
-    const ambiguous = report.licenseFiles.filter((h) => !h.id || h.score === undefined || h.score < 0.9);
+    const ambiguous = report.licenseFiles.filter(
+      (h) => !h.id || h.score === undefined || h.score < 0.9 || getMeta(h.id).category === "unknown"
+    );
     for (const hit of ambiguous.slice(0, 20)) {
       try {
         const adj: Adjudication = await adjudicate(aiCfg, hit.excerpt, hit.id ? `fingerprint matched ${hit.id} at ${(hit.score! * 100).toFixed(0)}%` : undefined);
@@ -232,7 +237,14 @@ async function main(): Promise<number> {
           hit.id = adj.license;
           hit.score = adj.confidence;
           if (!report.projectLicenses.has(adj.license) && !report.thirdParty.has(adj.license)) {
-            report.thirdParty.set(adj.license, { category: adj.category as never, files: [hit.file] });
+            const isRoot = report.projectLicenses.size === 0 && /^(?:UN)?LICEN[CS]E|^COPYING|^NOTICE$|^COPYRIGHT$/i.test(path.basename(hit.file));
+            if (isRoot) {
+              if (!report.projectLicenses.has(adj.license)) {
+                report.projectLicenses.set(adj.license, { category: adj.category as never, file: hit.file });
+              }
+            } else if (!report.thirdParty.has(adj.license)) {
+              report.thirdParty.set(adj.license, { category: adj.category as never, files: [hit.file] });
+            }
           }
         }
         console.error(`\u2713 AI adjudicated ${hit.file}: ${adj.license} (${adj.category}, confidence ${(adj.confidence * 100).toFixed(0)}%)`);
@@ -242,7 +254,7 @@ async function main(): Promise<number> {
     }
   }
 
-  // Re-evaluate rules with the AI-augmented third-party set (no re-walk needed).
+  // Re-evaluate rules with the AI-augmented license sets (no re-walk needed).
   if (aiCfg) {
     const ctx = buildContext({
       projectLicenses: report.projectLicenses,
@@ -252,6 +264,7 @@ async function main(): Promise<number> {
       ),
       root: report.root,
     });
+    ctx.hasNoticeFile = report.licenseFiles.some((h) => /^(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(h.file)));
     report.findings = evaluate(ctx);
     report.score = complianceScore(report.findings);
   }

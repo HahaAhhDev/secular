@@ -46,8 +46,52 @@ export function containment(a: Set<number>, b: Set<number>): number {
   return hit / a.size;
 }
 
+/**
+ * Popularity prior: when containment scores tie between near-duplicate SPDX
+ * families (MIT vs MIT-0, BSD-3-Clause vs BSD-3-Clause-Clear, GPL-3.0 vs
+ * AGPL-1.0 ...), prefer the id in real-world use. Derived from SPDX match
+ * frequency data + common package manifests; ordered by observed prevalence.
+ */
+const COMMON_IDS = [
+  "MIT", "Apache-2.0", "GPL-3.0-only", "GPL-2.0-only", "BSD-3-Clause", "BSD-2-Clause",
+  "ISC", "MPL-2.0", "Unlicense", "0BSD", "Zlib", "CC0-1.0", "AGPL-3.0-only",
+  "LGPL-3.0-only", "LGPL-2.1-only", "GPL-3.0-or-later", "GPL-2.0-or-later",
+  "AGPL-3.0-or-later", "BSL-1.0", "EPL-2.0", "EUPL-1.2", "CDDL-1.0", "Artistic-2.0",
+  "GPL-1.0-only", "LGPL-2.0-only", "MS-PL", "MS-RL", "NCBI-PD", "Sendmail",
+];
+const commonRank = (id: string): number => {
+  const i = COMMON_IDS.indexOf(id);
+  return i === -1 ? COMMON_IDS.length : i;
+};
+
+/**
+ * Set-level containment: every word of `small` appears somewhere in `big`.
+ * Used to detect derived-variant licenses (e.g. MIT-0 is MIT's text with
+ * nearly every clause present, minus a couple of words).
+ */
+function wordSetContained(small: string, big: string): boolean {
+  const a = new Set(small.split(" "));
+  const b = new Set(big.split(" "));
+  if (a.size > b.size) return false;
+  for (const w of a) if (!b.has(w)) return false;
+  return true;
+}
+
 export interface FingerprintIndex {
   licenses: { id: string; name: string; norm: string; sh: Set<number> }[];
+}
+
+/** True when all words of `small` appear in `big` in order (subsequence check). */
+function subsequence(small: string | undefined, big: string | undefined): boolean {
+  if (!small || !big || small.length > big.length) return false;
+  const words = small.split(" ");
+  const hay = big.split(" ");
+  let i = 0;
+  for (const w of hay) {
+    if (w === words[i]) i++;
+    if (i === words.length) return true;
+  }
+  return i === words.length;
 }
 
 export function buildIndex(catalog: SpdxCatalog): FingerprintIndex {
@@ -105,18 +149,49 @@ export function identify(
     .sort(
       (a, b) =>
         b.score - a.score ||
+        commonRank(a.id) - commonRank(b.id) ||
         b.lenSim - a.lenSim ||
         (b.deprecated ? 0 : 1) - (a.deprecated ? 0 : 1) ||
         a.id.localeCompare(b.id)
     );
 
-  const top = scored[0];
+  const top = scored[0] as (typeof scored)[number] | undefined;
   if (!top || top.score < 0.5) return [];
   // Prefer non-partial candidates on score ties: when the top hit is a
   // "partial" superset match, an exact-length sibling is more credible.
   const topCandidates = scored.filter((s) => s.score >= top.score - 0.05);
   const confident = topCandidates.filter((s) => !s.partial);
-  return (confident.length ? confident : topCandidates).slice(0, 3);
+  const winners = confident.length ? confident : topCandidates;
+
+  // Truncation rescue: if the winner's full text is contained inside a longer
+  // (partial) sibling — e.g. a truncated MIT file matching MIT-0 because its
+  // text is a subset of MIT — the superset is the true license.
+  const winner = winners[0]!;
+  if (confident.length && confident.length < topCandidates.length) {
+    const supersets = topCandidates.filter((s) => s.partial) as (FingerprintMatch & { norm: string })[];
+    const winnerNorm = (index.licenses.find((l) => l.id === winner.id)?.norm) ?? "";
+    const covered = supersets.find((s) => subsequence(winnerNorm, s.norm));
+    if (covered) return [covered as unknown as FingerprintMatch, ...winners.filter((w) => w.id !== covered.id)].slice(0, 3);
+  }
+
+  // Derived-variant disambiguation: some SPDX entries (MIT-0, NIST-PD, ...)
+  // are near-subsets of a much more common license. If the winner is an
+  // uncommon id whose full text is a strict subsequence of a common license's
+  // text, the uncommon id is a red herring — prefer the common license.
+  // Also applies when all candidates are partial (short/truncated queries).
+  if (commonRank(winner.id) === COMMON_IDS.length && winner.score < 0.95) {
+    const w = index.licenses.find((l) => l.id === winner.id);
+    if (w) {
+      const better = index.licenses.find(
+        (l) => l.id !== w.id && commonRank(l.id) < COMMON_IDS.length && wordSetContained(w.norm, l.norm)
+      );
+      if (better) {
+        const promoted = scored.find((s) => s.id === better.id);
+        if (promoted) return [promoted, ...winners.filter((x) => x.id !== winner.id)].slice(0, 3);
+      }
+    }
+  }
+  return winners.slice(0, 3);
 }
 
 export function licenseTextOf(lic: SpdxLicense): string | undefined {

@@ -33,6 +33,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --experimental-strip-types --no-warnings --test test/detect.test.ts",
     "prepublishOnly": "npm run build",
     "secular": "node dist/cli.js"
   },
