@@ -51,7 +51,6 @@ export function walk(root: string, maxFiles = 50_000): FoundFile[] {
       const abs = path.join(dir, e.name);
       if (e.isDirectory()) {
         if (!SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) queue.push(abs);
-        else if (e.name.startsWith(".") && e.name !== ".github") continue;
         continue;
       }
       if (!e.isFile()) continue;

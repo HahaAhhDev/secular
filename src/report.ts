@@ -165,19 +165,20 @@ export function toMarkdown(r: ScanReport): string {
 }
 
 export function toSarif(r: ScanReport): string {
+const severityMap: Record<Severity, string> = {
+  critical: "error",
+  error: "error",
+  warning: "warning",
+  info: "note",
+};
+
   const rules = [...new Set(r.findings.map((f) => f.rule))].map((id) => ({
     id,
     shortDescription: { text: id },
     fullDescription: { text: id },
-    defaultConfiguration: { level: "error" },
+    defaultConfiguration: { level: severityMap[r.findings.find((f) => f.rule === id)!.severity] },
   }));
 
-  const severityMap: Record<Severity, string> = {
-    critical: "error",
-    error: "error",
-    warning: "warning",
-    info: "note",
-  };
 
   return JSON.stringify(
     {

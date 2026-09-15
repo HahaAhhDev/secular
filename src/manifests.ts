@@ -71,10 +71,11 @@ export function parseGoMod(abs: string, source: string): Dep[] {
       const t = line.trim();
       if (/^require\s*\(/.test(t)) { inRequireBlock = true; continue; }
       if (inRequireBlock && /^\)/.test(t)) { inRequireBlock = false; continue; }
-      const m = inRequireBlock || /^require\s+/.test(t)
-        ? t.match(/^((?:require\s+)?)([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/)
-        : t.match(/^([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/);
-      if (m) deps.push({ name: (m[2] ?? m[1])!, scope: "dependency", ecosystem: "go", source });
+      const m = inRequireBlock
+        ? t.match(/^([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/)
+        : t.match(/^require\s+([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/);
+      const name = m?.[1];
+      if (name) deps.push({ name, scope: "dependency", ecosystem: "go", source });
     }
     return deps;
   } catch {

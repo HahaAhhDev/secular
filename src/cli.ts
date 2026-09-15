@@ -31,6 +31,16 @@ interface Args {
   strict?: boolean;
 }
 
+import { fileURLToPath } from "node:url";
+
+const VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8")).version as string;
+  } catch {
+    return "1.0.0";
+  }
+})();
+
 function parseArgs(argv: string[]): Args {
   const args: Args = {
     command: "scan",
@@ -105,7 +115,7 @@ function parseArgs(argv: string[]): Args {
         process.exit(0);
       case "--version":
       case "-v":
-        console.log("secular 1.0.0");
+        console.log(`secular ${VERSION}`);
         process.exit(0);
       default:
         if (!a.startsWith("--") && !a.startsWith("-")) {
