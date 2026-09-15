@@ -1,0 +1,55 @@
+name: ci
+
+# Continuous health: typecheck + build + tests on every push/PR, and a
+# weekly scheduled run that catches environment drift (new Node versions,
+# registry changes, upstream catalog changes) before a release does.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Smoke test CLI (exit codes + formats)
+        run: |
+          set -e
+          node dist/cli.js --version
+          node dist/cli.js --help > /dev/null
+          mkdir -p /tmp/smoke && printf '// SPDX-License-Identifier: MIT\n' > /tmp/smoke/a.ts
+          node dist/cli.js scan /tmp/smoke > /dev/null   # clean scan: exit 0
+          node dist/cli.js scan /tmp/smoke -f json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>JSON.parse(s))"
+          node dist/cli.js scan /tmp/smoke -f sarif | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>JSON.parse(s))"
+          node dist/cli.js scan /tmp/smoke -f markdown > /dev/null
+          node dist/cli.js scan /definitely-not-here 2>/dev/null && exit 1 || [ "$?" = "2" ]
+          echo "smoke OK on node ${{ matrix.node-version }}"

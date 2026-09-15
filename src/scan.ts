@@ -48,10 +48,16 @@ export interface ScanOptions {
 
 export async function scan(opts: ScanOptions): Promise<ScanReport> {
   const root = path.resolve(opts.root);
-  if (!fs.existsSync(root)) {
-    throw new Error(`directory not found: ${root}`);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(root);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EACCES") throw new Error(`permission denied: ${root}`);
+    if (code === "ENOENT") throw new Error(`directory not found: ${root}`);
+    throw new Error(`cannot read ${root}: ${(err as Error).message}`);
   }
-  if (!fs.statSync(root).isDirectory()) {
+  if (!stat.isDirectory()) {
     throw new Error(`not a directory: ${root}`);
   }
   const catalog = opts.catalog ?? (await loadCatalog({ refresh: opts.refreshCatalog }));

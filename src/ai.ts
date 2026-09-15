@@ -107,6 +107,12 @@ export async function adjudicate(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`AI provider rejected the API key (HTTP ${res.status}). Check the key and that --provider matches it.`);
+    }
+    if (res.status === 429) {
+      throw new Error("AI provider rate limit hit (HTTP 429). Retry later or reduce the number of ambiguous licenses.");
+    }
     throw new Error(`AI provider error ${res.status}: ${body.slice(0, 300)}`);
   }
 
@@ -117,7 +123,15 @@ export async function adjudicate(
   const raw = data.choices?.[0]?.message?.content ?? data.content?.[0]?.text ?? "";
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error("AI returned non-JSON response");
-  const parsed = JSON.parse(jsonMatch[0]) as Adjudication;
+  let parsed: Adjudication;
+  try {
+    parsed = JSON.parse(jsonMatch[0]) as Adjudication;
+  } catch {
+    throw new Error("AI returned malformed JSON");
+  }
   parsed.confidence = Number(parsed.confidence) || 0;
+  if (!parsed.license || typeof parsed.license !== "string") {
+    throw new Error("AI response missing license id");
+  }
   return parsed;
 }

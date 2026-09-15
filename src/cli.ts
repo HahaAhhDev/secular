@@ -294,10 +294,32 @@ async function main(): Promise<number> {
   return hasCritical ? 1 : 0;
 }
 
+// ---- Global error handling ------------------------------------------------
+// Anything that escapes the command handlers lands here: a clean message on
+// stderr, an exit code of 2, and no stack-trace spew unless SECULAR_DEBUG is
+// set. Unhandled rejections from async paths are caught the same way.
+
+function fail(err: unknown, label: string): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (process.env.SECULAR_DEBUG) {
+    console.error(`secular: [${label}]`, err);
+  } else {
+    console.error(`secular: ${msg}`);
+  }
+  process.exit(2);
+}
+
+process.on("unhandledRejection", (reason) => fail(reason, "unhandled rejection"));
+process.on("uncaughtException", (err) => fail(err, "uncaught exception"));
+
+// A broken output pipe (e.g. `secular scan . | head`) must not spew a JS
+// stack trace; exit quietly like well-behaved CLI tools do.
+process.stdout?.on?.("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EPIPE") process.exit(0);
+  throw err;
+});
+
 main().then(
   (code) => process.exit(code),
-  (err) => {
-    console.error(`secular: ${(err as Error).message}`);
-    process.exit(2);
-  }
+  (err) => fail(err, "fatal")
 );
