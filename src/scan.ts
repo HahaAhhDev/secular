@@ -161,15 +161,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
   const proprietary = opts.proprietary ?? heuristicProprietary(root, rootLicenses);
   const networkService = heuristicNetworkService(root);
 
-  const ctx: ScanContext = {
-    projectLicenses,
-    thirdParty,
-    proprietary,
-    networkService,
-    hasNoticeFile: files.some(
-      (f) => f.kind === "license" && /(^|\/)(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(f.rel))
-    ),
-  };
+  const ctx = buildContext({ projectLicenses, thirdParty, proprietary, root });
   const findings = evaluate(ctx);
   const score = complianceScore(findings);
 
@@ -184,6 +176,21 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
     score,
     catalogVersion: catalog.licenseListVersion,
     usedAi: false,
+  };
+}
+
+/** Shared context builder so CLI re-evaluation matches scan-time logic exactly. */
+export function buildContext(input: {
+  projectLicenses: ScanContext["projectLicenses"];
+  thirdParty: ScanContext["thirdParty"];
+  proprietary: boolean;
+  root: string;
+}): ScanContext {
+  return {
+    projectLicenses: input.projectLicenses,
+    thirdParty: input.thirdParty,
+    proprietary: input.proprietary,
+    networkService: heuristicNetworkService(input.root),
   };
 }
 

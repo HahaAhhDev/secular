@@ -11,7 +11,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { scan, heuristicNetworkService } from "./scan.js";
+import { scan, buildContext } from "./scan.js";
 import { evaluate, complianceScore } from "./rules.js";
 import { adjudicate, resolveAiConfig, type Adjudication } from "./ai.js";
 import { terminal, toJson, toMarkdown, toSarif, toNotices } from "./report.js";
@@ -39,6 +39,15 @@ function parseArgs(argv: string[]): Args {
   };
   const VALID_FORMATS = new Set(["terminal", "json", "markdown", "sarif"]);
   const rest = argv.slice();
+  const isFlag = (s: string | undefined) => s !== undefined && s.startsWith("-") && s !== "-";
+  const shiftValue = (flag: string): string => {
+    const v = rest.shift();
+    if (v === undefined || isFlag(v)) {
+      console.error(`error: ${flag} requires a value`);
+      process.exit(2);
+    }
+    return v;
+  };
   while (rest.length) {
     const a = rest.shift()!;
     switch (a) {
@@ -50,34 +59,34 @@ function parseArgs(argv: string[]): Args {
         break;
       case "--format":
       case "-f": {
-        const fmt = rest.shift() as Args["format"] | undefined;
-        if (!fmt || !VALID_FORMATS.has(fmt)) {
+        const fmt = shiftValue(a);
+        if (!VALID_FORMATS.has(fmt)) {
           console.error(`error: --format must be one of: ${[...VALID_FORMATS].join(", ")}`);
           process.exit(2);
         }
-        args.format = fmt;
+        args.format = fmt as Args["format"];
         break;
       }
       case "--api-key":
       case "-k":
-        args.apiKey = rest.shift();
+        args.apiKey = shiftValue(a);
         break;
       case "--provider":
-        args.provider = rest.shift();
+        args.provider = shiftValue(a);
         break;
       case "--model":
-        args.model = rest.shift();
+        args.model = shiftValue(a);
         break;
       case "--base-url":
-        args.baseUrl = rest.shift();
+        args.baseUrl = shiftValue(a);
         break;
       case "--output":
       case "-o":
-        args.output = rest.shift();
+        args.output = shiftValue(a);
         break;
       case "--min-severity": {
-        const sev = rest.shift();
-        if (!sev || !SEV_ORDER.includes(sev)) {
+        const sev = shiftValue(a);
+        if (!SEV_ORDER.includes(sev)) {
           console.error(`error: --min-severity must be one of: ${SEV_ORDER.join(", ")}`);
           process.exit(2);
         }
@@ -225,19 +234,15 @@ async function main(): Promise<number> {
 
   // Re-evaluate rules with the AI-augmented third-party set (no re-walk needed).
   if (aiCfg) {
-    report.findings = evaluate({
+    const ctx = buildContext({
       projectLicenses: report.projectLicenses,
       thirdParty: report.thirdParty,
-      proprietary: [...report.projectLicenses.values()].some(
+      proprietary: ![...report.projectLicenses.values()].some(
         (i) => i.category === "strong-copyleft" || i.category === "weak-copyleft"
-      )
-        ? false
-        : true,
-      networkService: heuristicNetworkService(report.root),
-      hasNoticeFile: report.licenseFiles.some((h) =>
-        /(^|\/)(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(h.file))
       ),
+      root: report.root,
     });
+    report.findings = evaluate(ctx);
     report.score = complianceScore(report.findings);
   }
 

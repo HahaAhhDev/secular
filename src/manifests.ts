@@ -17,10 +17,12 @@ export interface Dep {
 export function parsePackageJson(abs: string, source: string): Dep[] {
   try {
     const pkg = JSON.parse(fs.readFileSync(abs, "utf8"));
+    if (!pkg || typeof pkg !== "object" || Array.isArray(pkg)) return [];
     const deps: Dep[] = [];
     const add = (obj: unknown, scope: "dependency" | "dev") => {
-      if (!obj || typeof obj !== "object") return;
+      if (!obj || typeof obj !== "object" || Array.isArray(obj)) return;
       for (const name of Object.keys(obj as Record<string, unknown>)) {
+        if (!name) continue;
         deps.push({ name, scope, ecosystem: "npm", source });
       }
     };
@@ -64,9 +66,15 @@ export function parseGoMod(abs: string, source: string): Dep[] {
   try {
     const text = fs.readFileSync(abs, "utf8");
     const deps: Dep[] = [];
+    let inRequireBlock = false;
     for (const line of text.split(/\r?\n/)) {
-      const m = line.match(/^\s*(?:require\s+)?([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/);
-      if (m) deps.push({ name: m[1]!, scope: "dependency", ecosystem: "go", source });
+      const t = line.trim();
+      if (/^require\s*\(/.test(t)) { inRequireBlock = true; continue; }
+      if (inRequireBlock && /^\)/.test(t)) { inRequireBlock = false; continue; }
+      const m = inRequireBlock || /^require\s+/.test(t)
+        ? t.match(/^((?:require\s+)?)([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/)
+        : t.match(/^([A-Za-z0-9._/-]+\.[A-Za-z]{2,}\/[^\s]+)\s+(v\d)/);
+      if (m) deps.push({ name: (m[2] ?? m[1])!, scope: "dependency", ecosystem: "go", source });
     }
     return deps;
   } catch {
