@@ -161,7 +161,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
   const proprietary = opts.proprietary ?? heuristicProprietary(root, rootLicenses);
   const networkService = heuristicNetworkService(root);
 
-  const hasNoticeFile = files.some((f) => /^(?:UN)?LICEN[CS]E|^NOTICE|^THIRD[-_ ]?PARTY|^LEGAL/i.test(path.basename(f.rel)));
+  const hasNoticeFile = files.some((f) => /^(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(f.rel)));
 
   const ctx = buildContext({ projectLicenses, thirdParty, proprietary, root });
   (ctx as { hasNoticeFile?: boolean }).hasNoticeFile = hasNoticeFile;
