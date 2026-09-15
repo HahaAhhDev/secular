@@ -21,6 +21,8 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 Requires Node.js ≥ 18.
 
+> **Registry note:** the canonical published package is **`@hahaahhdev/secular` on GitHub Packages** — every release of this repo is published there automatically. The package is *not* currently on npmjs.org; do not `npm install secular` expecting this tool.
+
 **GitHub Packages** (published as `@hahaahhdev/secular`):
 
 ```bash

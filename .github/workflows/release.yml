@@ -37,7 +37,25 @@ jobs:
             exit 1
           fi
 
-      - name: Publish
+      - name: Publish to GitHub Packages
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional: also publish to npmjs.org. Runs only when an NPM_TOKEN
+      # secret exists; otherwise skipped silently. The npm name differs
+      # (scoped vs unscoped) so add "name" handling here if you enable it.
+      - name: Check for NPM_TOKEN
+        id: npmtoken
+        run: |
+          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npmjs.org
+        if: steps.npmtoken.outputs.available == 'true'
+        run: npm publish --registry https://registry.npmjs.org
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
