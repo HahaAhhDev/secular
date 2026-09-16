@@ -4,176 +4,157 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Secular — License Compliance Scanning</title>
-<meta name="description" content="License compliance scanning for your codebase. Fingerprint-matches licenses against the SPDX catalog, applies a rules engine, and emits SARIF for CI.">
+<meta name="description" content="Offline license compliance scanning against the full SPDX catalog. Fingerprint matching, a compatibility rules engine, SARIF for CI, and optional AI adjudication.">
 <style>
   :root {
-    --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
-    --card: #161b22; --border: #30363d; --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --bg: #0b0e14;
+    --surface: #11151f;
+    --border: #1e2430;
+    --fg: #e8ecf1;
+    --muted: #8a93a3;
+    --accent: #6ee7a0;
+    --accent-dim: #234534;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--fg); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.65 -apple-system, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 72px 24px 96px; }
+
+  header { margin-bottom: 56px; }
+  h1 {
+    font-size: 2.4rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  h1 span { color: var(--accent); }
+  .tagline { color: var(--muted); font-size: 1.1rem; max-width: 620px; margin-top: 12px; }
+
+  .install {
+    margin-top: 32px;
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .install code { font-family: var(--mono); font-size: 0.86rem; color: var(--accent); flex: 1; overflow-x: auto; white-space: nowrap; }
+  .install button {
+    background: var(--accent); color: #0b0e14; border: 0; border-radius: 6px;
+    font: 600 0.78rem/1 inherit; padding: 8px 14px; cursor: pointer;
+  }
+  .install button:hover { filter: brightness(1.1); }
+
+  h2 {
+    font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em;
+    margin: 56px 0 16px;
+    padding-top: 24px; border-top: 1px solid var(--border);
+  }
+  h2:first-of-type { border-top: 0; padding-top: 0; }
+
+  p { color: var(--muted); }
+  p strong, li strong { color: var(--fg); font-weight: 600; }
+
+  pre {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; margin: 14px 0;
+    font-family: var(--mono); font-size: 0.85rem; line-height: 1.7; color: #c9d4e0;
+  }
+  pre .c { color: #5c6575; }
+  code.inline, li code, p code, td code {
+    font-family: var(--mono); font-size: 0.84em;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 5px; padding: 1.5px 6px; color: var(--accent);
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.92rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--muted); vertical-align: top; }
+  td:first-child { color: var(--fg); white-space: nowrap; }
+
+  .sev { font-weight: 600; }
+  .critical { color: #f87171; } .error { color: #fbbf24; }
+  .warning { color: #fbbf24; } .info { color: #67c9ea; }
+
+  footer {
+    margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 0.84rem;
+  }
+  footer a { color: var(--muted); }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 48px 24px; }
-  h1 { font-size: 2.4rem; letter-spacing: -0.02em; }
-  h1 .tm { font-size: 1rem; vertical-align: super; color: var(--muted); }
-  .tagline { color: var(--muted); font-size: 1.15rem; margin: 8px 0 32px; }
-  h2 { margin: 40px 0 16px; font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-  .badges span { display: inline-block; background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 2px 10px; margin-right: 8px; font-size: 0.85rem; color: var(--muted); }
-  pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0; font-size: 0.9rem; }
-  code { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
-  p code, li code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 0.85em; }
-  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.95rem; }
-  th, td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
-  th { background: var(--card); }
-  .sev { font-weight: 600; }
-  .sev.critical { color: var(--red); } .sev.error { color: var(--red); }
-  .sev.warning { color: var(--yellow); } .sev.info { color: var(--accent); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 20px 0; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
-  .card h3 { margin-bottom: 8px; font-size: 1.05rem; }
-  .card p { color: var(--muted); font-size: 0.92rem; }
-  .cta { display: inline-block; background: #238636; color: #fff; font-weight: 600; border-radius: 8px; padding: 10px 20px; margin: 8px 8px 0 0; }
-  .cta:hover { background: #2ea043; text-decoration: none; }
-  .cta.ghost { background: transparent; border: 1px solid var(--border); }
-  .cta.ghost:hover { border-color: var(--accent); }
-  footer { margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+  .links { margin-top: 24px; display: flex; gap: 20px; font-size: 0.92rem; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Secular<span class="tm">™</span></h1>
-  <p class="tagline">License compliance scanning for your codebase — offline fingerprinting against the full SPDX catalog, a compatibility rules engine, and optional AI adjudication for custom licenses.</p>
 
-  <div class="badges">
-    <span>Node.js ≥ 18</span>
-    <span>Zero runtime dependencies</span>
-    <span>727 SPDX license texts</span>
-    <span>SARIF 2.1.0</span>
-    <span>Works offline — no API key for scanning</span>
-  </div>
+  <header>
+    <h1>Secular<span>™</span></h1>
+    <p class="tagline">License compliance scanning for your codebase. Offline fingerprinting against the full SPDX catalog, a compatibility rules engine, SARIF for CI, and optional AI adjudication for custom licenses.</p>
+    <div class="install">
+      <code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh | bash</code>
+      <button onclick="navigator.clipboard.writeText(document.getElementById('install-cmd').textContent);this.textContent='copied';setTimeout(()=>this.textContent='copy',1200)">copy</button>
+    </div>
+    <nav class="links">
+      <a href="https://github.com/HahaAhhDev/secular">GitHub</a>
+      <a href="https://github.com/HahaAhhDev/secular/tree/master/docs">Documentation</a>
+      <a href="https://github.com/HahaAhhDev/secular/releases">Releases</a>
+    </nav>
+  </header>
 
-  <a class="cta" href="https://github.com/HahaAhhDev/secular">Source on GitHub</a>
-  <a class="cta ghost" href="#quickstart">Get started</a>
-  <a class="cta ghost" href="https://github.com/HahaAhhDev/secular/pkgs/npm/@hahaahhdev%2Fsecular">GitHub Packages</a>
+  <h2>Why secular</h2>
+  <p><strong>Fully offline</strong> — 727 SPDX license texts cached locally; scanning never touches the network. <strong>Fingerprint matching</strong> — normalized shingle-based containment with popularity priors, so truncated and reformatted license files still match the right id. <strong>CI-native</strong> — SARIF 2.1.0, meaningful exit codes, and policy gates that fail builds on your terms.</p>
 
-  <h2>What it does</h2>
-  <div class="grid">
-    <div class="card"><h3>Fingerprint matching</h3><p>Normalizes and shingle-hashes license text, matching full files and inline headers against the SPDX catalog by containment similarity. Popularity priors disambiguate near-duplicate families.</p></div>
-    <div class="card"><h3>Rules engine</h3><p>Detects copyleft in proprietary code, network copyleft in service stacks, non-open licenses, weak-copyleft obligations, and missing NOTICE files.</p></div>
-    <div class="card"><h3>Manifest parsing</h3><p>Reads dependency lists from npm, Cargo, Go, PyPI, RubyGems, and Packagist manifests.</p></div>
-    <div class="card"><h3>Smart skip detection</h3><p>Bundled runtimes and dependency trees (<code>python-3.12.7/</code>, <code>node_modules</code>, <code>site-packages</code>, …) are auto-detected and skipped. Ask for a prompt, or override with <code>--scan-all</code>.</p></div>
-    <div class="card"><h3>CI-native output</h3><p>Terminal, JSON, Markdown, and SARIF 2.1.0 for GitHub Code Scanning. Meaningful exit codes, a <code>--strict</code> gate, category/score/allow-list policy gates, and a <code>--ci</code> preset.</p></div>
-    <div class="card"><h3>Config file &amp; scaffolding</h3><p>Options live in <code>.secularrc.json</code>; <code>--init</code> and <code>--init-ci</code> generate config and GitHub Actions scaffolds. <code>--list-rules</code>, <code>--license-info</code>, <code>--spdx-info</code> for introspection.</p></div>
-    <div class="card"><h3>AI adjudication (optional)</h3><p>Custom or non-SPDX license texts go to your LLM (OpenAI, Anthropic, OpenRouter, or local Ollama) and the classification folds back into the rules engine. Requires an API key — plain scanning never does.</p></div>
-    <div class="card"><h3>Offline first</h3><p>The SPDX catalog is cached locally; scanning and scoring never need network access. A failed refresh falls back to the cached catalog.</p></div>
-  </div>
+  <h2>Quick start</h2>
+  <pre>secular scan /path/to/project          <span class="c"># terminal report, no API key</span>
+secular scan . --ci -o license.sarif   <span class="c"># CI gate: strict + quiet + SARIF</span>
+secular notice .                       <span class="c"># THIRD-PARTY-NOTICES.md</span>
+secular ai . --api-key sk-ant-...      <span class="c"># optional: classify custom licenses</span></pre>
 
-  <h2 id="quickstart">Quick start</h2>
-  <pre><code># Install — one line, no npm auth, no git (Linux/macOS; Git Bash/WSL on Windows)
-curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh | bash
-
-# Scan any directory — no API key needed
-secular scan /path/to/project
-
-# CI gate with SARIF output
-secular scan /path/to/project -f sarif -o license.sarif --strict
-
-# Generate a THIRD-PARTY-NOTICES.md
-secular notice /path/to/project
-
-# Classify custom licenses with AI (the only command needing a key)
-secular ai /path/to/project --api-key sk-ant-...
-
-# Control auto-detected skip directories
-secular scan . --skip-mode ask    # prompt: [i]gnore / [s]can
-secular scan . --scan-all         # scan detected dirs too
-secular scan . --exclude fixtures # skip your own dirs too</code></pre>
-
-  <h2>Ways to install</h2>
+  <h2>Policy gates</h2>
   <table>
-    <tr><th>Route</th><th>How</th><th>Notes</th></tr>
-    <tr><td><strong>Installer</strong> (recommended)</td><td><code>curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh | bash</code></td><td>Prebuilt tarball from GitHub Releases. No npm, no auth, no git. Linux/macOS; Windows via Git Bash/WSL.</td></tr>
-    <tr><td>npx / npm</td><td><code>npx @hahaahhdev/secular scan .</code></td><td>Requires one-time GitHub Packages auth (a GitHub token). Works on Windows via Node directly.</td></tr>
-    <tr><td>GitHub Packages (npm install)</td><td>token setup + <code>npm install -g @hahaahhdev/secular</code></td><td><em>Least recommended</em>: same auth setup as npx, and pins the install to npm config on the machine.</td></tr>
-    <tr><td>From source</td><td>git clone → <code>npm install && npm run build</code></td><td>For development; <code>npm link</code> puts <code>secular</code> on PATH.</td></tr>
+    <tr><th>Flag</th><th>Fails when</th></tr>
+    <tr><td><code>--strict</code></td><td>Any finding at/above <code>--min-severity</code></td></tr>
+    <tr><td><code>--fail-on-category &lt;c&gt;</code></td><td>Any license matches a category (e.g. <code>strong-copyleft</code>)</td></tr>
+    <tr><td><code>--fail-on-score &lt;n&gt;</code></td><td>Compliance score is below n</td></tr>
+    <tr><td><code>--deny-license &lt;id&gt;</code></td><td>A prohibited SPDX id appears anywhere</td></tr>
+    <tr><td><code>--allow-license &lt;id&gt;</code></td><td>— (suppresses findings instead)</td></tr>
   </table>
-
-  <p>See the <a href="https://github.com/HahaAhhDev/secular#installation">README</a> for full details and uninstall instructions.</p>
 
   <h2>Rules &amp; severities</h2>
   <table>
     <tr><th>Rule</th><th>Severity</th><th>Trigger</th></tr>
     <tr><td><code>COPYLEFT-IN-PROPRIETARY</code></td><td class="sev critical">critical</td><td>Strong copyleft (GPL) in a proprietary codebase</td></tr>
-    <tr><td><code>NETWORK-COPYLEFT</code></td><td class="sev critical">critical</td><td>AGPL/EUPL/OSL-style license in a network service</td></tr>
-    <tr><td><code>NON-OPEN-LICENSE</code></td><td class="sev critical">critical</td><td>SSPL, CC-BY-NC*, and other non-open licenses</td></tr>
-    <tr><td><code>PROJECT-LICENSE-CONFLICT</code></td><td class="sev error">error</td><td>Root LICENSE is copyleft but the project appears proprietary</td></tr>
-    <tr><td><code>PROJECT-LICENSE-UNFREE</code></td><td class="sev error">error</td><td>Root LICENSE restricts use</td></tr>
-    <tr><td><code>WEAK-COPYLEFT</code></td><td class="sev warning">warning</td><td>MPL, EPL, CDDL, LGPL — disclose modifications</td></tr>
-    <tr><td><code>UNKNOWN-LICENSE</code></td><td class="sev warning">warning</td><td>Unidentifiable license text — <code>secular ai</code> can classify it</td></tr>
-    <tr><td><code>MISSING-NOTICE</code></td><td class="sev info">info</td><td>Attribution licenses present but no NOTICE file</td></tr>
+    <tr><td><code>NETWORK-COPYLEFT</code></td><td class="sev critical">critical</td><td>AGPL/EUPL/OSL-style network copyleft</td></tr>
+    <tr><td><code>NON-OPEN-LICENSE</code></td><td class="sev critical">critical</td><td>SSPL, CC-BY-NC*, other non-open licenses</td></tr>
+    <tr><td><code>DENIED-LICENSE</code></td><td class="sev critical">critical</td><td>Your <code>--deny-license</code> policy</td></tr>
+    <tr><td><code>PROJECT-LICENSE-CONFLICT</code></td><td class="sev error">error</td><td>Copyleft root LICENSE in an apparently proprietary project</td></tr>
+    <tr><td><code>WEAK-COPYLEFT</code></td><td class="sev warning">warning</td><td>MPL, EPL, CDDL, LGPL</td></tr>
+    <tr><td><code>UNKNOWN-LICENSE</code></td><td class="sev warning">warning</td><td>Unidentifiable text — <code>secular ai</code> can classify it</td></tr>
+    <tr><td><code>MISSING-NOTICE</code></td><td class="sev info">info</td><td>Attribution licenses present, no NOTICE file</td></tr>
   </table>
+  <p>Score: 0–100. Critical −30, error −15, warning −5, info −1. Clean scan = 100.</p>
 
-  <h2>Compliance score</h2>
-  <p>A 0–100 score, penalized per finding: <strong>critical −30</strong>, <strong>error −15</strong>, <strong>warning −5</strong>, <strong>info −1</strong>. A clean scan scores 100; the score floors at 0.</p>
+  <h2>Smart skip detection</h2>
+  <p>Bundled runtimes (<code>python-3.12.7/</code>, <code>jdk-21/</code>, <code>miniconda3/</code>) and dependency trees (<code>node_modules</code>, <code>site-packages</code>) are auto-detected and skipped — their licenses aren't your compliance surface. Vendored licenses under <code>vendor/</code> <strong>are</strong> scanned. Control it with <code>--skip-mode ask</code> (prompt once: ignore/scan), <code>--scan-all</code>, or <code>--exclude</code>.</p>
 
-  <h2>Exit codes</h2>
-  <table>
-    <tr><th>Code</th><th>Meaning</th></tr>
-    <tr><td><code>0</code></td><td>Clean — no findings at or above the threshold</td></tr>
-    <tr><td><code>1</code></td><td>Findings present (any at/above the threshold with <code>--strict</code>, otherwise any critical)</td></tr>
-    <tr><td><code>2</code></td><td>Usage or IO error</td></tr>
-  </table>
+  <h2>Configuration</h2>
+  <pre><span class="c"># .secularrc.json — CLI flags always override</span>
+{
+  "denyLicense": ["SSPL-1.0"],
+  "failOnCategory": ["strong-copyleft"],
+  "strict": true
+}</pre>
+  <p>Generate scaffolds with <code>secular --init</code> and <code>secular --init-ci</code>.</p>
 
-  <h2>Commands</h2>
-  <table>
-    <tr><th>Command</th><th>Description</th></tr>
-    <tr><td><code>secular scan [dir]</code></td><td>Scan a codebase (default)</td></tr>
-    <tr><td><code>secular ai [dir]</code></td><td>Scan + AI adjudication of custom/unknown licenses (requires API key)</td></tr>
-    <tr><td><code>secular notice [dir]</code></td><td>Generate THIRD-PARTY-NOTICES.md</td></tr>
-    <tr><td><code>secular cache --refresh</code></td><td>Force-refresh the SPDX catalog cache</td></tr>
-  </table>
-
-  <h2>Skip modes &amp; excludes</h2>
-  <p>Secular auto-detects directories that are not your compliance surface — bundled runtimes (<code>python-3.12.x</code>, <code>cpython-*</code>, <code>node-v*</code>, <code>jdk-*</code>, <code>miniconda*</code>), dependency trees (<code>node_modules</code>, <code>site-packages</code>, <code>Pods</code>), and build artifacts. Control what happens:</p>
-  <table>
-    <tr><th>Flag</th><th>Behavior</th></tr>
-    <tr><td><code>--skip-mode auto</code></td><td>Skip detected directories silently (default; safe for CI)</td></tr>
-    <tr><td><code>--skip-mode ask</code></td><td>Show what was detected and prompt once: <code>[i]gnore / [s]can</code> — default is ignore, <code>-y</code> answers automatically</td></tr>
-    <tr><td><code>--skip-mode scan</code> / <code>--scan-all</code></td><td>Never ask — scan the detected directories too</td></tr>
-    <tr><td><code>--exclude &lt;dir&gt;</code></td><td>Skip your own directories by name (repeatable, case-insensitive, always applies)</td></tr>
-  </table>
-  <p>The prompt writes to stderr, so JSON/SARIF output stays clean. Also settable via the <code>SECULAR_SKIP_MODE</code> environment variable. License files inside <code>vendor</code>-style directories are always scanned — vendored licenses are compliance-relevant.</p>
-
-  <h2>Policy gates</h2>
-  <table>
-    <tr><th>Flag</th><th>Behavior</th></tr>
-    <tr><td><code>--fail-on-score &lt;n&gt;</code></td><td>Exit 1 if the compliance score is below n</td></tr>
-    <tr><td><code>--fail-on-category &lt;c&gt;</code></td><td>Exit 1 if any license matches a category (repeatable)</td></tr>
-    <tr><td><code>--fail-on-unknown</code></td><td>Exit 1 if any license text went unidentified</td></tr>
-    <tr><td><code>--deny-license &lt;id&gt;</code></td><td>Exit 1 if this SPDX id appears anywhere (repeatable)</td></tr>
-    <tr><td><code>--allow-license &lt;id&gt;</code></td><td>Suppress findings for an explicitly allowed SPDX id</td></tr>
-    <tr><td><code>--min-score &lt;n&gt;</code></td><td>Only trust fingerprint matches at/above this confidence (0–1)</td></tr>
-    <tr><td><code>--ci</code></td><td>CI preset: strict + quiet + SARIF output</td></tr>
-  </table>
-
-  <h2>Performance &amp; control</h2>
-  <table>
-    <tr><th>Flag</th><th>Behavior</th></tr>
-    <tr><td><code>--max-files &lt;n&gt;</code></td><td>Cap the number of files scanned</td></tr>
-    <tr><td><code>--timeout &lt;seconds&gt;</code></td><td>Abort the scan if it exceeds this duration</td></tr>
-    <tr><td><code>--exclude-file &lt;name&gt;</code></td><td>Skip files by basename (repeatable)</td></tr>
-    <tr><td><code>--no-vendor-scan</code></td><td>Skip everything under vendor-style dirs, licenses included</td></tr>
-    <tr><td><code>--include-hidden</code></td><td>Also scan hidden (dot-prefixed) directories</td></tr>
-    <tr><td><code>--dep-audit</code></td><td>List declared dependencies with no matching disk license</td></tr>
-    <tr><td><code>--summary</code></td><td>One-line output: score · files · findings · duration</td></tr>
-    <tr><td><code>--list-rules</code></td><td>Print all rules with severities</td></tr>
-  </table>
-
-  <h2>Config file</h2>
-  <p>Options persist in <code>.secularrc.json</code> (or pass <code>--config &lt;file&gt;</code>). CLI flags override config values. <code>secular --init</code> generates a scaffold; <code>secular --init-ci</code> generates a GitHub Actions workflow. Introspect licenses with <code>secular --license-info &lt;id&gt;</code> and <code>secular --spdx-info &lt;id&gt;</code>.</p>
-
-  <p>See the <a href="https://github.com/HahaAhhDev/secular#readme">full README</a> for every option, AI provider setup, environment variables, and troubleshooting.</p>
+  <h2>Installing</h2>
+  <p>The one-line installer above is the recommended route — no npm auth, no git, works on Linux, macOS, and Windows (Git Bash/WSL). Also available via <code>npx @hahaahhdev/secular</code> or from source. Full details in the <a href="https://github.com/HahaAhhDev/secular/tree/master/docs/installing.md">installing guide</a>.</p>
 
   <footer>
     Secular is detection and analysis tooling — findings are engineering guidance, not legal advice.<br>
