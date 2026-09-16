@@ -9,7 +9,7 @@ import { walk, resetLastSkipped, lastSkipped, type SkipMode, type SkippedDir, ty
 import { buildIndex, identify, type FingerprintMatch } from "./detect.js";
 import { loadCatalog, type SpdxCatalog } from "./spdx.js";
 import { getMeta, type Category } from "./meta.js";
-import { evaluate, complianceScore, type Finding, type ScanContext } from "./rules.js";
+import { evaluate, complianceScore, severityRank, type Finding, type ScanContext } from "./rules.js";
 import {
   parsePackageJson, parseCargoToml, parseGoMod, parsePyproject, parseGemfile, parseComposerJson,
   type Dep,
@@ -209,26 +209,69 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
 
   const hasNoticeFile = files.some((f) => /^(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(f.rel)));
 
-  // Dependency audit: which declared deps have no matching disk license?
+  // Dependency audit: per-dependency check. A declared dependency is
+  // satisfied when a license file exists somewhere under root in a directory
+  // named after the dependency (e.g. vendor/express/LICENSE), or when the
+  // manifest's own directory tree carries a LICENSE at/above the manifest.
+  // Everything else is flagged "no-license-file".
   let depAuditResult: ScanReport["depAudit"] | undefined;
   if (opts.depAudit) {
-    const licenseDirs = new Set(files.filter((f) => f.kind === "license").map((f) => path.dirname(f.rel)));
-    const topDeps = deps.filter((d) => d.scope === "dependency");
-    depAuditResult = topDeps.map((d) => ({
-      name: d.name,
-      ecosystem: d.ecosystem,
-      issue: "no-license-file" as const,
-    })).filter((m) => {
-      // Heuristic: a dependency with no license file anywhere in the tree —
-      // reported only when nothing was detected for its ecosystem at all.
-      return licenseDirs.size === 0;
-    });
+    const licenseDirs = [...new Set(files.filter((f) => f.kind === "license").map((f) => path.dirname(f.rel)))];
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9._/-]/g, "");
+    const depName = (n: string) => norm(n.includes("/") ? n.split("/")[1]! : n);
+    const satisfied = (dep: Dep): boolean => {
+      const base = depName(dep.name);
+      // 1) A license directory matching the dep name (vendor/express/LICENSE).
+      if (licenseDirs.some((dir) => dir.split("/").some((seg) => norm(seg) === base))) return true;
+      // 2) A license at/above the manifest that declares it.
+      const mdir = path.dirname(dep.source);
+      let cur = mdir;
+      while (true) {
+        const prefix = cur === "." ? null : `${cur}/`;
+        if (licenseDirs.some((dir) => dir === cur || (prefix !== null && dir.startsWith(prefix)))) return true;
+        if (cur === ".") break;
+        cur = path.dirname(cur);
+      }
+      return false;
+    };
+    const flagged = deps.filter((d) => d.scope === "dependency" && !satisfied(d));
+    // Dedupe by name+ecosystem (a dep can appear in several manifests).
+    const seen = new Set<string>();
+    depAuditResult = flagged.filter((d) => {
+      const k = `${d.ecosystem}:${d.name}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).map((d) => ({ name: d.name, ecosystem: d.ecosystem, issue: "no-license-file" as const }));
     if (depAuditResult.length === 0) depAuditResult = undefined;
   }
 
   const ctx = buildContext({ projectLicenses, thirdParty, proprietary, root });
   (ctx as { hasNoticeFile?: boolean }).hasNoticeFile = hasNoticeFile;
-  const findings = evaluate(ctx);
+  let findings = evaluate(ctx);
+  // Policy allowlist: suppress findings tied to explicitly allowed licenses.
+  if (opts.allowLicenses?.length) {
+    const allowed = new Set(opts.allowLicenses.map((l) => l.toUpperCase()));
+    findings = findings.filter((f) => !f.license || !allowed.has(f.license.toUpperCase()));
+  }
+  // Policy denylist: prohibited licenses are always critical findings.
+  if (opts.denyLicenses?.length) {
+    const denied = new Set(opts.denyLicenses.map((l) => l.toUpperCase()));
+    for (const [id, info] of thirdParty) {
+      if (denied.has(id.toUpperCase()) && !findings.some((f) => f.license === id)) {
+        findings.push({
+          rule: "DENIED-LICENSE",
+          severity: "critical",
+          title: `License "${id}" is on the deny list`,
+          detail: `This license is explicitly prohibited by policy (--deny-license).`,
+          license: id,
+          file: info.files[0],
+          remediation: `Remove or replace the dependency licensed under ${id}, or update the policy.`,
+        });
+      }
+    }
+    findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  }
   const score = complianceScore(findings);
 
   return {

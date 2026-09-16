@@ -12,7 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { scan, buildContext } from "./scan.js";
-import { evaluate, complianceScore, severityRank, type Severity } from "./rules.js";
+import { evaluate, complianceScore, severityRank, type Finding, type Severity } from "./rules.js";
 import { adjudicate, resolveAiConfig, type Adjudication } from "./ai.js";
 import { getMeta } from "./meta.js";
 import { terminal, toJson, toMarkdown, toSarif, toNotices } from "./report.js";
@@ -72,7 +72,7 @@ const SEV_ORDER = ["info", "warning", "error", "critical"];
 const KNOWN_RULES = new Set([
   "COPYLEFT-IN-PROPRIETARY", "NETWORK-COPYLEFT", "NON-OPEN-LICENSE",
   "PROJECT-LICENSE-CONFLICT", "PROJECT-LICENSE-UNFREE", "WEAK-COPYLEFT",
-  "UNKNOWN-LICENSE", "MISSING-NOTICE",
+  "UNKNOWN-LICENSE", "MISSING-NOTICE", "DENIED-LICENSE",
 ]);
 
 const VALID_CATEGORIES = new Set([
@@ -90,11 +90,12 @@ const RULE_INFO: Record<string, string> = {
   "MISSING-NOTICE": "info — Attribution licenses present but no NOTICE/THIRD-PARTY file",
 };
 
-function parseArgs(argv: string[]): Args | "handled" {
+function parseArgs(argv: string[], configDefaults: Partial<Args> = {}): Args | "handled" {
   const args: Args = {
     command: "scan",
     dir: ".",
     format: "terminal",
+    ...configDefaults,
   };
   const VALID_FORMATS = new Set(["terminal", "json", "markdown", "sarif"]);
   const rest = argv.slice();
@@ -106,6 +107,18 @@ function parseArgs(argv: string[]): Args | "handled" {
       process.exit(2);
     }
     return v;
+  };
+  // Track which option keys the CLI explicitly set, so repeatable-array
+  // flags (--exclude, --exclude-file, --allow-license, --deny-license,
+  // --fail-on-rule, --fail-on-category) REPLACE their config defaults
+  // instead of appending to them.
+  const cliSet = new Set<keyof Args>();
+  const setArr = <K extends "exclude" | "excludeFile" | "allowLicense" | "denyLicense" | "failOnRule" | "failOnCategory">(key: K, value: string) => {
+    if (!cliSet.has(key)) {
+      args[key] = [];
+      cliSet.add(key);
+    }
+    (args[key] as string[]).push(value);
   };
   while (rest.length) {
     const a = rest.shift()!;
@@ -158,7 +171,7 @@ function parseArgs(argv: string[]): Args | "handled" {
           console.error(`error: --fail-on-rule must be one of: ${[...KNOWN_RULES].join(", ")}`);
           process.exit(2);
         }
-        (args.failOnRule ??= []).push(rule);
+        setArr("failOnRule", rule);
         break;
       }
       case "--exclude": {
@@ -167,7 +180,7 @@ function parseArgs(argv: string[]): Args | "handled" {
           console.error("error: --exclude requires a directory name");
           process.exit(2);
         }
-        (args.exclude ??= []).push(dir);
+        setArr("exclude", dir);
         break;
       }
       case "--json-include-license-files":
@@ -179,7 +192,7 @@ function parseArgs(argv: string[]): Args | "handled" {
           console.error(`error: --fail-on-category must be one of: ${[...VALID_CATEGORIES].join(", ")}`);
           process.exit(2);
         }
-        (args.failOnCategory ??= []).push(cat);
+        setArr("failOnCategory", cat);
         break;
       }
       case "--fail-on-score": {
@@ -195,10 +208,10 @@ function parseArgs(argv: string[]): Args | "handled" {
         args.failOnUnknown = true;
         break;
       case "--allow-license":
-        (args.allowLicense ??= []).push(shiftValue(a));
+        setArr("allowLicense", shiftValue(a));
         break;
       case "--deny-license":
-        (args.denyLicense ??= []).push(shiftValue(a));
+        setArr("denyLicense", shiftValue(a));
         break;
       case "--min-score": {
         const n = Number(shiftValue(a));
@@ -228,7 +241,7 @@ function parseArgs(argv: string[]): Args | "handled" {
         break;
       }
       case "--exclude-file":
-        (args.excludeFile ??= []).push(shiftValue(a));
+        setArr("excludeFile", shiftValue(a));
         break;
       case "--no-vendor-scan":
         args.noVendorScan = true;
@@ -373,11 +386,6 @@ function writeConfigScaffold(): void {
     process.exit(2);
   }
   const scaffold = {
-    $schema: "https://raw.githubusercontent.com/HahaAhhDev/secular/master/schema/secularrc.schema.json",
-    exclude: [],
-    excludeFile: [],
-    minSeverity: "info",
-    skipMode: "auto",
     failOnRule: [],
     failOnCategory: [],
     allowLicense: [],
@@ -577,12 +585,44 @@ function makeSkipDecision(): (skipped: { rel: string; reason: string }[]) => "ig
 let args: Args; // populated by main; used by makeSkipDecision for -y
 
 /**
- * Merge configuration from a JSON config file (found via --config <path>,
- * ./.secularrc.json, or $SECULAR_RC) into parsed CLI args. CLI flags win.
- * Returns [args, configFileUsed].
+ * Load configuration values from a JSON config file (--config <path>,
+ * $SECULAR_RC, or ./.secularrc.json). They serve as DEFAULTS: explicit CLI
+ * flags are applied on top and win. Invalid values are warned about and
+ * skipped; a broken file never fails the scan.
  */
-function applyConfig(args: Args): { config: Args; file?: string } {
-  const candidates = [args.config, process.env.SECULAR_RC, ".secularrc.json"];
+function peekConfigPath(argv: string[]): string | undefined {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--config") return argv[i + 1];
+  }
+  return undefined;
+}
+
+function loadConfigValues(configPath?: string): { values: Partial<Args>; file?: string | undefined } {
+  const candidates = [configPath, process.env.SECULAR_RC, ".secularrc.json"];
+  const isStrArr = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+  const isBool = (v: unknown) => typeof v === "boolean";
+  const validators: Partial<Record<keyof Args, (v: unknown) => boolean>> = {
+    exclude: isStrArr,
+    excludeFile: isStrArr,
+    failOnRule: isStrArr,
+    failOnCategory: isStrArr,
+    allowLicense: isStrArr,
+    denyLicense: isStrArr,
+    minSeverity: (v) => SEV_ORDER.includes(v as string),
+    skipMode: (v) => v === "auto" || v === "ask" || v === "scan",
+    format: (v) => ["terminal", "json", "markdown", "sarif"].includes(v as string),
+    strict: isBool,
+    quiet: isBool,
+    summary: isBool,
+    failOnUnknown: isBool,
+    depAudit: isBool,
+    noVendorScan: isBool,
+    includeHidden: isBool,
+    minScore: (v) => typeof v === "number" && v > 0 && v <= 1,
+    failOnScore: (v) => typeof v === "number" && v >= 0 && v <= 100,
+    maxFiles: (v) => typeof v === "number" && Number.isInteger(v) && v > 0,
+    timeout: (v) => typeof v === "number" && v > 0,
+  };
   for (const c of candidates) {
     if (!c) continue;
     try {
@@ -592,55 +632,40 @@ function applyConfig(args: Args): { config: Args; file?: string } {
         console.error(`warning: ${c} is not a JSON object — ignoring`);
         continue;
       }
-      const merge = <K extends keyof Args>(key: K, validate?: (v: unknown) => boolean) => {
-        const v = raw[key];
-        if (v === undefined) return;
-        if (validate && !validate(v)) {
+      const values: Partial<Args> = {};
+      let valid = true;
+      for (const [key, validator] of Object.entries(validators) as [keyof Args, (v: unknown) => boolean][]) {
+        const v = raw[key as string];
+        if (v === undefined) continue;
+        if (!validator(v)) {
           console.error(`warning: ${c}: invalid value for "${String(key)}" — ignoring`);
-          return;
+          valid = false;
+          continue;
         }
-        (args[key] as unknown) = v;
-      };
-      const isStrArr = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
-      merge("exclude", isStrArr);
-      merge("excludeFile", isStrArr);
-      merge("failOnRule", isStrArr);
-      merge("failOnCategory", isStrArr);
-      merge("allowLicense", isStrArr);
-      merge("denyLicense", isStrArr);
-      merge("minSeverity", (v) => SEV_ORDER.includes(v as string));
-      merge("skipMode", (v) => v === "auto" || v === "ask" || v === "scan");
-      merge("format", (v) => ["terminal", "json", "markdown", "sarif"].includes(v as string));
-      merge("strict");
-      merge("quiet");
-      merge("summary");
-      merge("failOnUnknown");
-      merge("depAudit");
-      merge("noVendorScan");
-      merge("includeHidden");
-      merge("minScore", (v) => typeof v === "number" && v > 0 && v <= 1);
-      merge("failOnScore", (v) => typeof v === "number" && v >= 0 && v <= 100);
-      merge("maxFiles", (v) => typeof v === "number" && Number.isInteger(v) && v > 0);
-      merge("timeout", (v) => typeof v === "number" && v > 0);
-      return { config: args, file: c };
+        (values as Record<string, unknown>)[key as string] = v;
+      }
+      return { values, file: c };
     } catch (err) {
       console.error(`warning: could not read config ${c}: ${(err as Error).message}`);
     }
   }
-  return { config: args };
+  return { values: {} };
 }
 
 async function main(): Promise<number> {
-  const parsed = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  // Config values are defaults; parseArgs applies CLI flags on top so the
+  // command line always wins.
+  const cfg = loadConfigValues(peekConfigPath(argv));
+  const parsed = parseArgs(argv, cfg.values);
   if (parsed === "handled") {
     // Async info commands (--license-info / --spdx-info) print and exit on
     // their own; keep the process alive until they do.
     await new Promise(() => {}); // never resolves — exited by the handler
   }
   args = parsed as Args;
-  const { file: configFile } = applyConfig(args);
-  if (configFile && !args.quiet) {
-    console.error(`note: using config from ${configFile}`);
+  if (cfg.file && !args.quiet) {
+    console.error(`note: using config from ${cfg.file}`);
   }
 
   if (args.listRules) {
@@ -780,7 +805,8 @@ async function main(): Promise<number> {
           license: id,
           file: info.files[0],
           remediation: `Remove or replace the dependency licensed under ${id}, or update the policy.`,
-        });
+          policy: true,
+        } as Finding & { policy?: boolean });
       }
     }
   }
@@ -800,7 +826,10 @@ async function main(): Promise<number> {
   report.score = complianceScore(report.findings);
 
   // Re-evaluate rules with the AI-augmented license sets (no re-walk needed).
+  // Policy findings added above (DENIED-LICENSE) are preserved: they carry a
+  // `policy: true` marker and are re-appended after re-evaluation.
   if (aiCfg) {
+    const policyFindings = report.findings.filter((f) => (f as { policy?: boolean }).policy);
     const ctx = buildContext({
       projectLicenses: report.projectLicenses,
       thirdParty: report.thirdParty,
@@ -810,7 +839,7 @@ async function main(): Promise<number> {
       root: report.root,
     });
     ctx.hasNoticeFile = report.licenseFiles.some((h) => /^(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(h.file)));
-    report.findings = evaluate(ctx);
+    report.findings = [...evaluate(ctx), ...policyFindings];
     report.score = complianceScore(report.findings);
   }
 
@@ -820,19 +849,8 @@ async function main(): Promise<number> {
     if (min >= 0) report.findings = report.findings.filter((f) => SEV_ORDER.indexOf(f.severity) >= min);
   }
 
-  // Category gating: exit 1 if any discovered license matches a listed category.
-  if (args.failOnCategory?.length) {
-    const cats = new Set(args.failOnCategory);
-    const hitCategories = [
-      ...[...report.projectLicenses.values()].map((v) => v.category),
-      ...[...report.thirdParty.values()].map((v) => v.category),
-    ];
-    if (hitCategories.some((c) => cats.has(c))) return 1;
-  }
-
-  // Unknown-license gating: fail when any license text went unidentified.
-  if (args.failOnUnknown && report.licenseFiles.some((h) => !h.id)) return 1;
-
+  // ---- Report output MUST happen before gates return, so `--fail-on-*` with
+  // `-o file` still produces the report file for CI to upload. ----
   let out: string;
   (globalThis as { __SECULAR_VERSION__?: string }).__SECULAR_VERSION__ = VERSION;
   if (args.summary) {
@@ -853,7 +871,18 @@ async function main(): Promise<number> {
     console.log(out);
   }
 
-  // ---- Exit-code logic ----
+  // ---- Exit-code logic (all gates evaluated AFTER output is emitted) ----
+  // Category gating: exit 1 if any discovered license matches a listed category.
+  if (args.failOnCategory?.length) {
+    const cats = new Set(args.failOnCategory);
+    const hitCategories = [
+      ...[...report.projectLicenses.values()].map((v) => v.category),
+      ...[...report.thirdParty.values()].map((v) => v.category),
+    ];
+    if (hitCategories.some((c) => cats.has(c))) return 1;
+  }
+  // Unknown-license gating: fail when any license text went unidentified.
+  if (args.failOnUnknown && report.licenseFiles.some((h) => !h.id)) return 1;
   // 1) --strict: any finding at/above threshold fails (minSeverity already
   //    applied to report.findings).
   if (args.strict && report.findings.length > 0) return 1;

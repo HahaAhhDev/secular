@@ -4,6 +4,8 @@
 
 📖 **Web documentation:** [hahaahhdev.github.io/secular](https://hahaahhdev.github.io/secular/)
 
+📚 **Full docs:** [docs/](docs/) — installing, CLI reference, config, rules, skip modes, AI adjudication
+
 Secular walks your repository, fingerprint-matches every license file and source header against the full SPDX catalog, parses dependency manifests, and applies a compatibility rules engine. The output: ranked findings, a 0–100 compliance score, and reports in terminal, JSON, Markdown, or SARIF.
 
 Everything runs offline. The only feature that touches the network is AI adjudication (optional) and the initial SPDX catalog fetch (cached).
