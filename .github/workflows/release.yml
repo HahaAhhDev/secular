@@ -8,7 +8,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -59,3 +59,23 @@ jobs:
         run: npm publish --registry https://registry.npmjs.org
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Build a self-contained tarball (dist/ + package.json + LICENSE + README)
+      # and attach it to the GitHub Release. install.sh downloads this —
+      # no npm, no auth, no git clone required.
+      - name: Build install tarball
+        run: |
+          mkdir -p /tmp/pkg/secular-${GITHUB_REF_NAME}
+          cp -r dist /tmp/pkg/secular-${GITHUB_REF_NAME}/
+          cp package.json LICENSE README.md /tmp/pkg/secular-${GITHUB_REF_NAME}/
+          tar -czf "/tmp/secular-${GITHUB_REF_NAME}.tar.gz" -C /tmp/pkg "secular-${GITHUB_REF_NAME}"
+          shasum -a 256 "/tmp/secular-${GITHUB_REF_NAME}.tar.gz" > "/tmp/secular-${GITHUB_REF_NAME}.tar.gz.sha256"
+
+      - name: Create / update GitHub Release with tarball
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "secular $GITHUB_REF_NAME" --generate-notes 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" \
+            "/tmp/secular-${GITHUB_REF_NAME}.tar.gz" \
+            "/tmp/secular-${GITHUB_REF_NAME}.tar.gz.sha256" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

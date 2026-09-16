@@ -19,50 +19,47 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 ## Installation
 
-Requires Node.js ≥ 18.
+Requires Node.js ≥ 18. Pick whichever route suits you — listed from simplest to most involved.
 
-> **Registry note:** the canonical published package is **`@hahaahhdev/secular` on GitHub Packages** — every release of this repo is published there automatically. The package is *not* currently on npmjs.org; do not `npm install secular` expecting this tool.
-
-**GitHub Packages** (published as `@hahaahhdev/secular`):
+**1. One-line installer (recommended — no npm, no auth, no git):**
 
 ```bash
-# One-time setup: authenticate npm against GitHub Packages
+curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh | bash
+```
+
+Downloads a prebuilt tarball from GitHub Releases and puts `secular` on your PATH (`~/.local` by default; run with `sudo` for a system-wide install). Pin a version with `SECULAR_VERSION=v1.3.0`.
+
+> **Windows:** run the script from Git Bash or WSL, or skip installation entirely with `npx @hahaahhdev/secular scan .` (route 2).
+
+**2. npx without installing:**
+
+```bash
+# One-time npm setup for GitHub Packages (requires a GitHub token)
 github_token=$(gh auth token)   # or a PAT with read:packages
 npm config set @hahaahhdev:registry https://npm.pkg.github.com
 npm config set //npm.pkg.github.com/:_authToken="$github_token"
 
-# Then install globally
+# Then run directly, or install globally
+npx @hahaahhdev/secular scan .
 npm install -g @hahaahhdev/secular
-secular --version
 ```
 
-> GitHub Packages requires authentication for installs, so this two-line npm config is needed once per machine.
+> GitHub Packages requires authentication for installs, hence the token setup — this is why the installer (route 1) is recommended.
 
-**Install script** (Linux/macOS) — clones, builds, and puts `secular` on your PATH:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh -o install.sh
-./install.sh                 # user install (~/.local); use sudo for system-wide
-
-# later:
-curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/uninstall.sh -o uninstall.sh
-./uninstall.sh
-```
-
-**From source:**
+**3. From source:**
 
 ```bash
 git clone https://github.com/HahaAhhDev/secular.git
-cd secular
-npm install        # dev deps only: TypeScript + Node types
-npm run build
+cd secular && npm install && npm run build
 node dist/cli.js --help
+# or: npm link  → `secular` available globally from any directory
 ```
 
-**Or link directly** if you have the repo cloned:
+**Uninstall:**
 
 ```bash
-cd secular && npm link   # `secular` available globally from any directory
+curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/uninstall.sh | bash
+# or: npm uninstall -g @hahaahhdev/secular  (npm route)
 ```
 
 ## Quick start

@@ -34,6 +34,7 @@ if [ "$removed" -eq 0 ]; then
 fi
 
 # Hint about npm-managed installs
-if command -v npm >/dev/null 2>&1 && npm ls -g secular >/dev/null 2>&1; then
-  echo "An npm-managed copy also exists. Remove it with: npm uninstall -g secular"
+if command -v npm >/dev/null 2>&1; then
+  npm ls -g @hahaahhdev/secular >/dev/null 2>&1 && echo "A GitHub-Packages npm copy also exists. Remove it with: npm uninstall -g @hahaahhdev/secular"
+  npm ls -g secular >/dev/null 2>&1 && echo "An npm copy also exists. Remove it with: npm uninstall -g secular"
 fi
