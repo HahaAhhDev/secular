@@ -63,7 +63,8 @@
     <div class="card"><h3>Rules engine</h3><p>Detects copyleft in proprietary code, network copyleft in service stacks, non-open licenses, weak-copyleft obligations, and missing NOTICE files.</p></div>
     <div class="card"><h3>Manifest parsing</h3><p>Reads dependency lists from npm, Cargo, Go, PyPI, RubyGems, and Packagist manifests.</p></div>
     <div class="card"><h3>Smart skip detection</h3><p>Bundled runtimes and dependency trees (<code>python-3.12.7/</code>, <code>node_modules</code>, <code>site-packages</code>, …) are auto-detected and skipped. Ask for a prompt, or override with <code>--scan-all</code>.</p></div>
-    <div class="card"><h3>CI-native output</h3><p>Terminal, JSON, Markdown, and SARIF 2.1.0 for GitHub Code Scanning. Meaningful exit codes and a <code>--strict</code> gate.</p></div>
+    <div class="card"><h3>CI-native output</h3><p>Terminal, JSON, Markdown, and SARIF 2.1.0 for GitHub Code Scanning. Meaningful exit codes, a <code>--strict</code> gate, category/score/allow-list policy gates, and a <code>--ci</code> preset.</p></div>
+    <div class="card"><h3>Config file &amp; scaffolding</h3><p>Options live in <code>.secularrc.json</code>; <code>--init</code> and <code>--init-ci</code> generate config and GitHub Actions scaffolds. <code>--list-rules</code>, <code>--license-info</code>, <code>--spdx-info</code> for introspection.</p></div>
     <div class="card"><h3>AI adjudication (optional)</h3><p>Custom or non-SPDX license texts go to your LLM (OpenAI, Anthropic, OpenRouter, or local Ollama) and the classification folds back into the rules engine. Requires an API key — plain scanning never does.</p></div>
     <div class="card"><h3>Offline first</h3><p>The SPDX catalog is cached locally; scanning and scoring never need network access. A failed refresh falls back to the cached catalog.</p></div>
   </div>
@@ -137,6 +138,34 @@ secular scan . --exclude fixtures # skip your own dirs too</code></pre>
     <tr><td><code>--exclude &lt;dir&gt;</code></td><td>Skip your own directories by name (repeatable, case-insensitive, always applies)</td></tr>
   </table>
   <p>The prompt writes to stderr, so JSON/SARIF output stays clean. Also settable via the <code>SECULAR_SKIP_MODE</code> environment variable. License files inside <code>vendor</code>-style directories are always scanned — vendored licenses are compliance-relevant.</p>
+
+  <h2>Policy gates</h2>
+  <table>
+    <tr><th>Flag</th><th>Behavior</th></tr>
+    <tr><td><code>--fail-on-score &lt;n&gt;</code></td><td>Exit 1 if the compliance score is below n</td></tr>
+    <tr><td><code>--fail-on-category &lt;c&gt;</code></td><td>Exit 1 if any license matches a category (repeatable)</td></tr>
+    <tr><td><code>--fail-on-unknown</code></td><td>Exit 1 if any license text went unidentified</td></tr>
+    <tr><td><code>--deny-license &lt;id&gt;</code></td><td>Exit 1 if this SPDX id appears anywhere (repeatable)</td></tr>
+    <tr><td><code>--allow-license &lt;id&gt;</code></td><td>Suppress findings for an explicitly allowed SPDX id</td></tr>
+    <tr><td><code>--min-score &lt;n&gt;</code></td><td>Only trust fingerprint matches at/above this confidence (0–1)</td></tr>
+    <tr><td><code>--ci</code></td><td>CI preset: strict + quiet + SARIF output</td></tr>
+  </table>
+
+  <h2>Performance &amp; control</h2>
+  <table>
+    <tr><th>Flag</th><th>Behavior</th></tr>
+    <tr><td><code>--max-files &lt;n&gt;</code></td><td>Cap the number of files scanned</td></tr>
+    <tr><td><code>--timeout &lt;seconds&gt;</code></td><td>Abort the scan if it exceeds this duration</td></tr>
+    <tr><td><code>--exclude-file &lt;name&gt;</code></td><td>Skip files by basename (repeatable)</td></tr>
+    <tr><td><code>--no-vendor-scan</code></td><td>Skip everything under vendor-style dirs, licenses included</td></tr>
+    <tr><td><code>--include-hidden</code></td><td>Also scan hidden (dot-prefixed) directories</td></tr>
+    <tr><td><code>--dep-audit</code></td><td>List declared dependencies with no matching disk license</td></tr>
+    <tr><td><code>--summary</code></td><td>One-line output: score · files · findings · duration</td></tr>
+    <tr><td><code>--list-rules</code></td><td>Print all rules with severities</td></tr>
+  </table>
+
+  <h2>Config file</h2>
+  <p>Options persist in <code>.secularrc.json</code> (or pass <code>--config &lt;file&gt;</code>). CLI flags override config values. <code>secular --init</code> generates a scaffold; <code>secular --init-ci</code> generates a GitHub Actions workflow. Introspect licenses with <code>secular --license-info &lt;id&gt;</code> and <code>secular --spdx-info &lt;id&gt;</code>.</p>
 
   <p>See the <a href="https://github.com/HahaAhhDev/secular#readme">full README</a> for every option, AI provider setup, environment variables, and troubleshooting.</p>
 
