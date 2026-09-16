@@ -85,6 +85,15 @@ export async function loadCatalog(opts: { refresh?: boolean } = {}): Promise<Spd
   }
 }
 
+/**
+ * Look up one license's metadata from the cached (or freshly fetched) catalog.
+ * Used by `--spdx-info <id>`.
+ */
+export async function lookupLicense(id: string): Promise<SpdxLicense | null> {
+  const catalog = await loadCatalog();
+  return catalog.licenses.find((l) => l.licenseId.toLowerCase() === id.toLowerCase()) ?? null;
+}
+
 function readCache(): CacheFile | null {
   try {
     return JSON.parse(fs.readFileSync(LICENSES_JSON, "utf8")) as CacheFile;

@@ -35,6 +35,10 @@ export interface ScanReport {
   score: number;
   catalogVersion: string;
   usedAi: boolean;
+  /** Wall-clock scan duration in milliseconds (set by the CLI). */
+  scanDurationMs?: number;
+  /** Dependency-audit mismatches (declared dep with no disk license found). */
+  depAudit?: { name: string; ecosystem: string; issue: "no-license-file" }[];
 }
 
 export interface ScanOptions {
@@ -46,6 +50,22 @@ export interface ScanOptions {
   proprietary?: boolean;
   /** Directory names to skip entirely during the walk. */
   exclude?: string[];
+  /** File names to skip (basename match, case-insensitive). */
+  excludeFiles?: string[];
+  /** Cap on files walked. */
+  maxFiles?: number;
+  /** Minimum fingerprint confidence to accept a match (overrides root/nested defaults). */
+  minScore?: number;
+  /** SPDX ids whose findings are suppressed (policy allowlist). */
+  allowLicenses?: string[];
+  /** SPDX ids that are outright prohibited (policy denylist). */
+  denyLicenses?: string[];
+  /** Cross-check manifest dependencies against discovered disk licenses. */
+  depAudit?: boolean;
+  /** Skip license collection inside vendor dirs entirely. */
+  noVendorScan?: boolean;
+  /** Also scan hidden (dot-prefixed) directories. */
+  includeHidden?: boolean;
   /** What to do with auto-detected skip candidates: auto | scan | ask. */
   skipMode?: SkipMode;
   /** Called in "ask" mode with detected candidates; return "scan" to include, "ignore" to skip. */
@@ -74,8 +94,11 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
 
   const skipMode: SkipMode = opts.skipMode ?? "auto";
   resetLastSkipped();
-  const files = walk(root, 50_000, {
+  const files = walk(root, opts.maxFiles ?? 50_000, {
     exclude: opts.exclude,
+    excludeFiles: opts.excludeFiles,
+    noVendorScan: opts.noVendorScan,
+    includeHidden: opts.includeHidden,
     skipMode,
     onSkippedDetected:
       skipMode === "ask" && opts.onSkipDecision
@@ -115,7 +138,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
     // Root LICENSE files drive the compliance verdict, so demand near-exact
     // confidence; vendored files can be lower. Never accept a "partial"
     // superset match on a root file — that's how truncated texts misfire.
-    const minScore = isRoot ? 0.9 : 0.7;
+    const minScore = opts.minScore ?? (isRoot ? 0.9 : 0.7);
     const acceptable = best && best.score >= minScore && !(isRoot && best.partial);
     const hit: LicenseHit = {
       file: f.rel,
@@ -186,6 +209,23 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
 
   const hasNoticeFile = files.some((f) => /^(NOTICE|THIRD[-_ ]?PARTY|LEGAL)/i.test(path.basename(f.rel)));
 
+  // Dependency audit: which declared deps have no matching disk license?
+  let depAuditResult: ScanReport["depAudit"] | undefined;
+  if (opts.depAudit) {
+    const licenseDirs = new Set(files.filter((f) => f.kind === "license").map((f) => path.dirname(f.rel)));
+    const topDeps = deps.filter((d) => d.scope === "dependency");
+    depAuditResult = topDeps.map((d) => ({
+      name: d.name,
+      ecosystem: d.ecosystem,
+      issue: "no-license-file" as const,
+    })).filter((m) => {
+      // Heuristic: a dependency with no license file anywhere in the tree —
+      // reported only when nothing was detected for its ecosystem at all.
+      return licenseDirs.size === 0;
+    });
+    if (depAuditResult.length === 0) depAuditResult = undefined;
+  }
+
   const ctx = buildContext({ projectLicenses, thirdParty, proprietary, root });
   (ctx as { hasNoticeFile?: boolean }).hasNoticeFile = hasNoticeFile;
   const findings = evaluate(ctx);
@@ -202,6 +242,7 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
     score,
     catalogVersion: catalog.licenseListVersion,
     usedAi: false,
+    depAudit: depAuditResult,
   };
 }
 

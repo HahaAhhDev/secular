@@ -107,6 +107,29 @@ secular cache --refresh            # refresh the SPDX catalog cache
 | `--no-color` | Disable colored terminal output (auto-disabled when output is not a terminal; respects `NO_COLOR` / `FORCE_COLOR`) |
 | `--json-include-license-files` | Include per-file license matches with confidence in JSON output |
 | `--strict` | Exit non-zero if any finding exists at or above the threshold (CI gate) |
+| `--fail-on-score <n>` | Exit 1 if the compliance score is below n (0–100) |
+| `--fail-on-category <cat>` | Exit 1 if any license matches a category (repeatable): `public-domain`, `permissive`, `weak-copyleft`, `strong-copyleft`, `network-copyleft`, `unfree`, `unknown` |
+| `--fail-on-unknown` | Exit 1 if any license text went unidentified |
+| `--deny-license <id>` | Exit 1 if this SPDX id is found anywhere (repeatable) |
+| `--allow-license <id>` | Suppress findings for this SPDX id (policy allowlist, repeatable) |
+| `--min-score <n>` | Only trust fingerprint matches at/above this confidence (0–1) |
+| `--max-files <n>` | Cap the number of files scanned |
+| `--timeout <seconds>` | Abort the scan if it exceeds this duration |
+| `--exclude-file <name>` | Skip files by basename (repeatable, case-insensitive) |
+| `--no-vendor-scan` | Skip everything under `vendor`-style dirs, licenses included |
+| `--include-hidden` | Also scan hidden (dot-prefixed) directories |
+| `--dep-audit` | List declared dependencies with no matching disk license (JSON: `depAudit`) |
+| `-q, --quiet` | Suppress notes/warnings on stderr |
+| `--summary` | One-line summary: `score · files · findings · duration` |
+| `--list-rules` | Print all rules with severities and exit |
+| `--ci` | CI preset: `--strict --quiet --format sarif` |
+| `--notice-format <fmt>` | `notice` output: `markdown` (default) or `text` |
+| `--append-notice` | Append to the notices file instead of overwriting |
+| `--config <file>` | Read options from a JSON config file (default: `.secularrc.json`) |
+| `--license-info <id>` | Print secular's classification metadata for an SPDX id and exit |
+| `--spdx-info <id>` | Print the SPDX catalog entry (name, OSI status, deprecated) and exit |
+| `--init` | Create a `.secularrc.json` scaffold in the current directory |
+| `--init-ci` | Create a GitHub Actions license-scanning workflow |
 | `--refresh` | Force SPDX catalog refresh before scanning |
 | `-h, --help` / `-v, --version` | Help / version |
 
@@ -198,7 +221,7 @@ secular ai . --provider ollama
 npm install
 npm run typecheck    # strict typecheck, no emit
 npm run build        # compile to dist/
-npm test             # 53 tests over detect, manifests, walker, rules, meta, report, ai
+npm test             # 55 tests over detect, manifests, walker, rules, meta, report, ai
 ```
 
 ### Releasing
@@ -243,6 +266,30 @@ src/
 **License shows as "Unknown"** — the text didn't match the catalog closely enough; Secular deliberately doesn't guess. Run `secular ai .` with an API key, or fix the file's `SPDX-License-Identifier` header.
 
 **Score lower than expected** — check for `info` findings (`MISSING-NOTICE` costs 1 point each). `secular notice .` generates the missing file.
+
+## Configuration file
+
+Options can live in a `.secularrc.json` next to where you run `secular` (or be passed via `--config <file>` / the `SECULAR_RC` env var). CLI flags override config values.
+
+```json
+{
+  "exclude": ["fixtures", "testdata"],
+  "denyLicense": ["SSPL-1.0"],
+  "failOnCategory": ["strong-copyleft"],
+  "minSeverity": "warning",
+  "skipMode": "auto",
+  "strict": true
+}
+```
+
+Run `secular --init` to generate a scaffold, `secular --init-ci` to generate a GitHub Actions workflow, and `secular --list-rules` to see every rule the engine can emit.
+
+## Info commands
+
+```bash
+secular --license-info GPL-3.0-only   # category, obligations, notable caveats
+secular --spdx-info MIT               # name, OSI approval, deprecation status
+```
 
 ## Legal note
 

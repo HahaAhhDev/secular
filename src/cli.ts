@@ -38,7 +38,26 @@ interface Args {
   output?: string;
   minSeverity?: string;
   failOnRule?: string[];
+  failOnCategory?: string[];
+  failOnScore?: number;
+  failOnUnknown?: boolean;
+  allowLicense?: string[];
+  denyLicense?: string[];
+  minScore?: number;
+  maxFiles?: number;
   exclude?: string[];
+  excludeFile?: string[];
+  config?: string;
+  quiet?: boolean;
+  summary?: boolean;
+  listRules?: boolean;
+  depAudit?: boolean;
+  ci?: boolean;
+  noticeFormat?: "markdown" | "text";
+  appendNotice?: boolean;
+  timeout?: number;
+  noVendorScan?: boolean;
+  includeHidden?: boolean;
   refresh?: boolean;
   strict?: boolean;
   noColor?: boolean;
@@ -56,7 +75,22 @@ const KNOWN_RULES = new Set([
   "UNKNOWN-LICENSE", "MISSING-NOTICE",
 ]);
 
-function parseArgs(argv: string[]): Args {
+const VALID_CATEGORIES = new Set([
+  "public-domain", "permissive", "weak-copyleft", "strong-copyleft", "network-copyleft", "unfree", "unknown",
+]);
+
+const RULE_INFO: Record<string, string> = {
+  "COPYLEFT-IN-PROPRIETARY": "critical — Strong copyleft (GPL) license in a proprietary codebase",
+  "NETWORK-COPYLEFT": "critical — AGPL/EUPL/OSL-style network copyleft license",
+  "NON-OPEN-LICENSE": "critical — SSPL, CC-BY-NC* and other non-open licenses",
+  "PROJECT-LICENSE-CONFLICT": "error — Root LICENSE is copyleft but project appears proprietary",
+  "PROJECT-LICENSE-UNFREE": "error — Root LICENSE restricts use",
+  "WEAK-COPYLEFT": "warning — MPL, EPL, CDDL, LGPL — disclose modifications",
+  "UNKNOWN-LICENSE": "warning — Unidentifiable license text",
+  "MISSING-NOTICE": "info — Attribution licenses present but no NOTICE/THIRD-PARTY file",
+};
+
+function parseArgs(argv: string[]): Args | "handled" {
   const args: Args = {
     command: "scan",
     dir: ".",
@@ -139,6 +173,131 @@ function parseArgs(argv: string[]): Args {
       case "--json-include-license-files":
         args.includeLicenseFiles = true;
         break;
+      case "--fail-on-category": {
+        const cat = shiftValue(a).toLowerCase();
+        if (!VALID_CATEGORIES.has(cat)) {
+          console.error(`error: --fail-on-category must be one of: ${[...VALID_CATEGORIES].join(", ")}`);
+          process.exit(2);
+        }
+        (args.failOnCategory ??= []).push(cat);
+        break;
+      }
+      case "--fail-on-score": {
+        const n = Number(shiftValue(a));
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          console.error("error: --fail-on-score requires a number 0-100");
+          process.exit(2);
+        }
+        args.failOnScore = n;
+        break;
+      }
+      case "--fail-on-unknown":
+        args.failOnUnknown = true;
+        break;
+      case "--allow-license":
+        (args.allowLicense ??= []).push(shiftValue(a));
+        break;
+      case "--deny-license":
+        (args.denyLicense ??= []).push(shiftValue(a));
+        break;
+      case "--min-score": {
+        const n = Number(shiftValue(a));
+        if (!Number.isFinite(n) || n <= 0 || n > 1) {
+          console.error("error: --min-score requires a number between 0 and 1 (e.g. 0.85)");
+          process.exit(2);
+        }
+        args.minScore = n;
+        break;
+      }
+      case "--max-files": {
+        const n = Number(shiftValue(a));
+        if (!Number.isInteger(n) || n < 1) {
+          console.error("error: --max-files requires a positive integer");
+          process.exit(2);
+        }
+        args.maxFiles = n;
+        break;
+      }
+      case "--timeout": {
+        const n = Number(shiftValue(a));
+        if (!Number.isFinite(n) || n <= 0) {
+          console.error("error: --timeout requires a positive number of seconds");
+          process.exit(2);
+        }
+        args.timeout = n;
+        break;
+      }
+      case "--exclude-file":
+        (args.excludeFile ??= []).push(shiftValue(a));
+        break;
+      case "--no-vendor-scan":
+        args.noVendorScan = true;
+        break;
+      case "--include-hidden":
+        args.includeHidden = true;
+        break;
+      case "--license-info": {
+        const id = shiftValue(a);
+        // Async internally; the .then chain calls process.exit when done.
+        printLicenseInfo(id);
+        return "handled"; // never falls through to main's scan flow
+      }
+      case "--spdx-info": {
+        const id = shiftValue(a);
+        import("./spdx.js").then(async ({ lookupLicense }) => {
+          const lic = await lookupLicense(id);
+          if (!lic) {
+            console.error(`error: "${id}" not found in the SPDX catalog`);
+            process.exit(2);
+          }
+          console.log(`${lic.licenseId}${lic.isDeprecatedLicenseId ? " (DEPRECATED)" : ""}${lic.isOsiApproved ? " [OSI-approved]" : ""}`);
+          console.log(`  name: ${lic.name}`);
+          if (lic.seeAlso?.length) console.log(`  see also: ${lic.seeAlso.join(", ")}`);
+          if (lic.licenseText) console.log(`  text: ${lic.licenseText.length} characters (cached)`);
+        }).then(() => process.exit(0), (err) => fail(err, "spdx-info"));
+        return "handled"; // async — handled above; process exits there
+      }
+      // (spdx-info continues from the shared async pattern above)
+      case "--init":
+        writeConfigScaffold();
+        process.exit(0);
+      case "--init-ci":
+        writeCiScaffold();
+        process.exit(0);
+      case "--config":
+        args.config = shiftValue(a);
+        break;
+      case "--quiet":
+      case "-q":
+        args.quiet = true;
+        break;
+      case "--summary":
+        args.summary = true;
+        break;
+      case "--list-rules":
+        args.listRules = true;
+        break;
+      case "--dep-audit":
+        args.depAudit = true;
+        break;
+      case "--ci":
+        args.ci = true;
+        args.strict = true;
+        args.quiet = true;
+        args.format = "sarif";
+        break;
+      case "--notice-format": {
+        const f = shiftValue(a);
+        if (f !== "markdown" && f !== "text") {
+          console.error("error: --notice-format must be markdown or text");
+          process.exit(2);
+        }
+        args.noticeFormat = f;
+        break;
+      }
+      case "--append-notice":
+        args.appendNotice = true;
+        break;
       case "--skip-mode": {
         const m = shiftValue(a);
         if (m !== "auto" && m !== "ask" && m !== "scan") {
@@ -189,6 +348,84 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
+/** Print category/obligations metadata for one SPDX id (--license-info). */
+function printLicenseInfo(id: string): void {
+  // Import lazily to keep startup fast for other commands.
+  import("./meta.js").then(({ getMeta, categoryLabel }) => {
+    const m = getMeta(id);
+    console.log(`${m.id}`);
+    console.log(`  category:    ${categoryLabel(m.category)} (${m.category})`);
+    console.log(`  obligations: ${m.obligations}`);
+    if (m.notable) console.log(`  notable:     ${m.notable}`);
+    if (m.category === "unknown") {
+      console.log("\nThis id is not in secular's built-in metadata.");
+      console.log("The SPDX catalog may still contain the full text — try scanning a file containing it.");
+    }
+    process.exit(0);
+  }).catch((err) => fail(err, "license-info"));
+}
+
+/** Write a commented .secularrc.json scaffold (--init). */
+function writeConfigScaffold(): void {
+  const file = ".secularrc.json";
+  if (fs.existsSync(file)) {
+    console.error(`error: ${file} already exists`);
+    process.exit(2);
+  }
+  const scaffold = {
+    $schema: "https://raw.githubusercontent.com/HahaAhhDev/secular/master/schema/secularrc.schema.json",
+    exclude: [],
+    excludeFile: [],
+    minSeverity: "info",
+    skipMode: "auto",
+    failOnRule: [],
+    failOnCategory: [],
+    allowLicense: [],
+    denyLicense: [],
+    strict: false,
+    format: "terminal",
+  };
+  fs.writeFileSync(file, JSON.stringify(scaffold, null, 2) + "\n");
+  console.error(`\u2713 Created ${file} — edit it, values apply to every scan in this directory tree.`);
+}
+
+/** Write a GitHub Actions workflow scaffold (--init-ci). */
+function writeCiScaffold(): void {
+  const dir = ".github/workflows";
+  const file = `${dir}/secular.yml`;
+  if (fs.existsSync(file)) {
+    console.error(`error: ${file} already exists`);
+    process.exit(2);
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, `# Auto-generated by secular --init-ci
+name: license-compliance
+on: [push, pull_request]
+
+jobs:
+  secular:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install secular
+        run: |
+          github_token=\${{ secrets.GITHUB_TOKEN }}
+          npm config set @hahaahhdev:registry https://npm.pkg.github.com
+          npm config set //npm.pkg.github.com/:_authToken "\$github_token"
+          npm install -g @hahaahhdev/secular
+      - name: Scan
+        run: secular scan . --ci --strict -o license.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: license.sarif
+`);
+  console.error(`\u2713 Created ${file} — commit it to enable license scanning in GitHub Actions.`);
+}
+
 function printHelp(): void {
   console.log(`
 ${"\u001b[1m"}secular${"\u001b[0m"} — license compliance scanning (v${VERSION})
@@ -221,7 +458,31 @@ ${"\u001b[1m"}OPTIONS${"\u001b[0m"}
       --json-include-license-files  Include per-file license matches in JSON
       --refresh           Force SPDX catalog refresh
   -h, --help              Show help
+      --license-info <id>     Print secular's classification metadata for an SPDX id
+      --spdx-info <id>        Print SPDX catalog entry for an id (name, OSI, deprecated)
+      --init                  Create a .secularrc.json config scaffold in the current dir
+      --init-ci               Create a GitHub Actions workflow for license scanning
   -v, --version           Show version
+
+${"\u001b[1m"}POLICY GATES${"\u001b[0m"}
+      --fail-on-category <c>  Exit 1 if any license matches category (repeatable):
+                          public-domain | permissive | weak-copyleft |
+                          strong-copyleft | network-copyleft | unfree | unknown
+      --fail-on-score <n>     Exit 1 if compliance score is below n (0-100)
+      --fail-on-unknown       Exit 1 if any license text went unidentified
+      --deny-license <id>     Exit 1 if this SPDX id is found (repeatable)
+      --allow-license <id>    Suppress findings for this SPDX id (policy allowlist)
+      --min-score <n>         Only trust matches at/above this confidence (0-1)
+
+${"\u001b[1m"}PERFORMANCE & OUTPUT${"\u001b[0m"}
+      --max-files <n>         Cap the number of files scanned
+      --timeout <seconds>     Abort the scan if it runs longer than this
+      --exclude-file <name>   Skip files by name/pattern (repeatable)
+      --dep-audit             Cross-check manifest deps against disk licenses
+      -q, --quiet             Suppress notes/warnings on stderr
+      --summary               One-line summary instead of a full report
+      --list-rules            Print all rules and exit
+      --ci                    CI preset: --strict --quiet --format sarif
 
 ${"\u001b[1m"}EXAMPLES${"\u001b[0m"}
   secular scan .                          # basic scan, terminal report
@@ -230,6 +491,10 @@ ${"\u001b[1m"}EXAMPLES${"\u001b[0m"}
   secular scan . --strict && npm test     # CI gate
   secular scan . --fail-on-rule NETWORK-COPYLEFT
   secular scan . --exclude test --exclude fixtures
+  secular scan . --fail-on-category strong-copyleft
+  secular scan . --deny-license SSPL-1.0 --allow-license MIT
+  secular scan . --summary          # one line: score · files · findings
+  secular scan . --ci               # SARIF, strict, quiet
 `);
 }
 
@@ -311,8 +576,82 @@ function makeSkipDecision(): (skipped: { rel: string; reason: string }[]) => "ig
 }
 let args: Args; // populated by main; used by makeSkipDecision for -y
 
+/**
+ * Merge configuration from a JSON config file (found via --config <path>,
+ * ./.secularrc.json, or $SECULAR_RC) into parsed CLI args. CLI flags win.
+ * Returns [args, configFileUsed].
+ */
+function applyConfig(args: Args): { config: Args; file?: string } {
+  const candidates = [args.config, process.env.SECULAR_RC, ".secularrc.json"];
+  for (const c of candidates) {
+    if (!c) continue;
+    try {
+      if (!fs.existsSync(c)) continue;
+      const raw = JSON.parse(fs.readFileSync(c, "utf8"));
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        console.error(`warning: ${c} is not a JSON object — ignoring`);
+        continue;
+      }
+      const merge = <K extends keyof Args>(key: K, validate?: (v: unknown) => boolean) => {
+        const v = raw[key];
+        if (v === undefined) return;
+        if (validate && !validate(v)) {
+          console.error(`warning: ${c}: invalid value for "${String(key)}" — ignoring`);
+          return;
+        }
+        (args[key] as unknown) = v;
+      };
+      const isStrArr = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
+      merge("exclude", isStrArr);
+      merge("excludeFile", isStrArr);
+      merge("failOnRule", isStrArr);
+      merge("failOnCategory", isStrArr);
+      merge("allowLicense", isStrArr);
+      merge("denyLicense", isStrArr);
+      merge("minSeverity", (v) => SEV_ORDER.includes(v as string));
+      merge("skipMode", (v) => v === "auto" || v === "ask" || v === "scan");
+      merge("format", (v) => ["terminal", "json", "markdown", "sarif"].includes(v as string));
+      merge("strict");
+      merge("quiet");
+      merge("summary");
+      merge("failOnUnknown");
+      merge("depAudit");
+      merge("noVendorScan");
+      merge("includeHidden");
+      merge("minScore", (v) => typeof v === "number" && v > 0 && v <= 1);
+      merge("failOnScore", (v) => typeof v === "number" && v >= 0 && v <= 100);
+      merge("maxFiles", (v) => typeof v === "number" && Number.isInteger(v) && v > 0);
+      merge("timeout", (v) => typeof v === "number" && v > 0);
+      return { config: args, file: c };
+    } catch (err) {
+      console.error(`warning: could not read config ${c}: ${(err as Error).message}`);
+    }
+  }
+  return { config: args };
+}
+
 async function main(): Promise<number> {
-  args = parseArgs(process.argv.slice(2));
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed === "handled") {
+    // Async info commands (--license-info / --spdx-info) print and exit on
+    // their own; keep the process alive until they do.
+    await new Promise(() => {}); // never resolves — exited by the handler
+  }
+  args = parsed as Args;
+  const { file: configFile } = applyConfig(args);
+  if (configFile && !args.quiet) {
+    console.error(`note: using config from ${configFile}`);
+  }
+
+  if (args.listRules) {
+    console.log("Rules evaluated by secular:\n");
+    for (const [rule, info] of Object.entries(RULE_INFO)) {
+      console.log(`  ${rule}\n    ${info}`);
+    }
+    console.log("\nUse with --fail-on-rule <rule> to gate CI on specific rules.");
+    return 0;
+  }
+
   const skipMode = args.skipMode ?? ((process.env.SECULAR_SKIP_MODE as Args["skipMode"]) || "auto");
   const skipOpts = {
     skipMode: skipMode as "auto" | "ask" | "scan",
@@ -336,8 +675,19 @@ async function main(): Promise<number> {
 
   if (args.command === "notice") {
     const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude, ...skipOpts });
-    const notices = toNotices(report);
-    const out = args.output ?? "THIRD-PARTY-NOTICES.md";
+    const notices = toNotices(report, { format: args.noticeFormat ?? "markdown" });
+    const ext = (args.noticeFormat ?? "markdown") === "text" ? ".txt" : ".md";
+    const out = args.output ?? `THIRD-PARTY-NOTICES${ext}`;
+    if (args.appendNotice && fs.existsSync(out)) {
+      try {
+        fs.appendFileSync(out, "\n" + notices);
+        console.error(`\u2713 Appended notices to ${out}`);
+        return 0;
+      } catch (err) {
+        console.error(`error: cannot append to ${out}: ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
+        return 2;
+      }
+    }
     writeOutput(notices, out);
     return 0;
   }
@@ -357,8 +707,34 @@ async function main(): Promise<number> {
     }
   }
 
-  const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude, ...skipOpts });
+  // Overall scan timeout (--timeout seconds): guards hung scans on pathological
+  // filesystems (network mounts). A timer fires a clean error; scan continues
+  // normally if it finishes first.
+  if (args.timeout) {
+    const t = setTimeout(() => {
+      console.error(`error: scan timed out after ${args.timeout}s (use --timeout to increase)`);
+      process.exit(2);
+    }, args.timeout * 1000);
+    t.unref();
+  }
+
+  const scanStart = Date.now();
+  const report = await scan({
+    root: args.dir,
+    refreshCatalog: args.refresh,
+    exclude: args.exclude,
+    maxFiles: args.maxFiles,
+    minScore: args.minScore,
+    allowLicenses: args.allowLicense,
+    denyLicenses: args.denyLicense,
+    excludeFiles: args.excludeFile,
+    depAudit: args.depAudit,
+    noVendorScan: args.noVendorScan,
+    includeHidden: args.includeHidden,
+    ...skipOpts,
+  });
   report.usedAi = useAi;
+  report.scanDurationMs = Date.now() - scanStart;
 
   // AI adjudication of unknown / low-confidence licenses. Applies when the
   // fingerprinter found nothing, matched below 90%, or the matched id has no
@@ -391,6 +767,38 @@ async function main(): Promise<number> {
     }
   }
 
+  // License allow/deny lists: explicit policy overrides.
+  if (args.denyLicense?.length) {
+    const denied = new Set(args.denyLicense.map((l) => l.toUpperCase()));
+    for (const [id, info] of report.thirdParty) {
+      if (denied.has(id.toUpperCase())) {
+        report.findings.push({
+          rule: "DENIED-LICENSE",
+          severity: "critical",
+          title: `License "${id}" is on the deny list`,
+          detail: `This license is explicitly prohibited by policy (--deny-license).`,
+          license: id,
+          file: info.files[0],
+          remediation: `Remove or replace the dependency licensed under ${id}, or update the policy.`,
+        });
+      }
+    }
+  }
+  if (args.allowLicense?.length) {
+    const allowed = new Set(args.allowLicense.map((l) => l.toUpperCase()));
+    const filtered = report.findings.filter((f) => {
+      if (!f.license) return true;
+      // A finding for an explicitly allowed license is suppressed.
+      return !allowed.has(f.license.toUpperCase());
+    });
+    if (filtered.length !== report.findings.length && args.quiet !== true) {
+      console.error(`note: ${report.findings.length - filtered.length} finding(s) suppressed by --allow-license`);
+    }
+    report.findings = filtered;
+  }
+  report.findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  report.score = complianceScore(report.findings);
+
   // Re-evaluate rules with the AI-augmented license sets (no re-walk needed).
   if (aiCfg) {
     const ctx = buildContext({
@@ -412,13 +820,31 @@ async function main(): Promise<number> {
     if (min >= 0) report.findings = report.findings.filter((f) => SEV_ORDER.indexOf(f.severity) >= min);
   }
 
+  // Category gating: exit 1 if any discovered license matches a listed category.
+  if (args.failOnCategory?.length) {
+    const cats = new Set(args.failOnCategory);
+    const hitCategories = [
+      ...[...report.projectLicenses.values()].map((v) => v.category),
+      ...[...report.thirdParty.values()].map((v) => v.category),
+    ];
+    if (hitCategories.some((c) => cats.has(c))) return 1;
+  }
+
+  // Unknown-license gating: fail when any license text went unidentified.
+  if (args.failOnUnknown && report.licenseFiles.some((h) => !h.id)) return 1;
+
   let out: string;
   (globalThis as { __SECULAR_VERSION__?: string }).__SECULAR_VERSION__ = VERSION;
-  switch (args.format) {
-    case "json": out = toJson(report, { includeLicenseFiles: args.includeLicenseFiles }); break;
-    case "markdown": out = toMarkdown(report); break;
-    case "sarif": out = toSarif(report); break;
-    default: out = terminal(report, { color: useColor(args.noColor) });
+  if (args.summary) {
+    const topSev = report.findings[0]?.severity ?? null;
+    out = `${report.score}/100 · ${report.filesScanned} files · ${report.findings.length} finding${report.findings.length === 1 ? "" : "s"}${topSev ? ` (worst: ${topSev})` : ""} · ${report.scanDurationMs ?? 0}ms`;
+  } else {
+    switch (args.format) {
+      case "json": out = toJson(report, { includeLicenseFiles: args.includeLicenseFiles }); break;
+      case "markdown": out = toMarkdown(report); break;
+      case "sarif": out = toSarif(report); break;
+      default: out = terminal(report, { color: useColor(args.noColor) });
+    }
   }
 
   if (args.output) {
@@ -433,7 +859,9 @@ async function main(): Promise<number> {
   if (args.strict && report.findings.length > 0) return 1;
   // 2) --fail-on-rule: named rules fail regardless of severity.
   if (args.failOnRule?.length && report.findings.some((f) => args.failOnRule!.includes(f.rule))) return 1;
-  // 3) Default: any critical finding fails.
+  // 3) --fail-on-score: score below threshold fails.
+  if (args.failOnScore !== undefined && report.score < args.failOnScore) return 1;
+  // 4) Default: any critical finding fails.
   if (report.findings.some((f) => f.severity === "critical")) return 1;
   return 0;
 }

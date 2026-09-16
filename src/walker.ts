@@ -31,7 +31,7 @@ export const VENDOR_DIRS = new Set(["vendor", "third_party", "third-party", "dep
  */
 export const MODULE_DIRS = new Set([
   "node_modules", "site-packages", "dist-packages", "__pypackages__",
-  "jspm_packages", "bower_components", "Pods", "packages",
+  "jspm_packages", "bower_components", "Pods", "rust_packages",
 ]);
 
 /** Directory names that are almost certainly an interpreter/runtime install. */
@@ -113,6 +113,12 @@ const SOURCE_EXT = new Set([
 export interface WalkOptions {
   /** Directory names (any depth) to skip entirely. Case-insensitive. */
   exclude?: string[];
+  /** File basenames to skip entirely. Case-insensitive. */
+  excludeFiles?: string[];
+  /** Also scan license files inside vendor dirs' source tree (default on). */
+  noVendorScan?: boolean;
+  /** Also descend into hidden directories (default off). */
+  includeHidden?: boolean;
   /** What to do with auto-detected skip candidates. Default "auto". */
   skipMode?: SkipMode;
   /** Output for "ask" mode: detected candidates are reported here. Return null to scan them all instead. */
@@ -145,6 +151,9 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
   const detected: SkippedDir[] = [];
   // User --exclude always applies regardless of mode.
   const exclude = opts.exclude;
+  const excludeFiles = opts.excludeFiles?.map((e) => e.toLowerCase());
+  const noVendorScan = opts.noVendorScan === true;
+  const includeHidden = opts.includeHidden === true;
   // Visited real paths guard against symlink loops (a→b→a).
   const visited = new Set<string>([fs.realpathSync.native(root)]);
   // Queue entries carry the vendor context: inside a vendor dir we collect
@@ -180,15 +189,21 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
           isDir = true;
         }
         if (shouldExclude(e.name, exclude)) continue;
-        const reason = classifySkip(e.name, abs);
-        if (reason) {
-          if (skipMode === "scan") {
-            // User chose to scan detected candidates: fall through.
-          } else if (skipMode === "ask") {
-            detected.push({ rel, reason });
-            continue; // tentatively skipped; caller may rescan
-          } else {
-            continue; // auto: skip silently
+        if (includeHidden && e.name.startsWith(".")) {
+          // --include-hidden: hidden dirs enter the queue like normal dirs,
+          // skipping only VCS-internal ones that would recurse absurdly.
+          if (e.name === ".git" || e.name === ".hg" || e.name === ".svn") continue;
+        } else {
+          const reason = classifySkip(e.name, abs);
+          if (reason) {
+            if (skipMode === "scan") {
+              // User chose to scan detected candidates: fall through.
+            } else if (skipMode === "ask") {
+              detected.push({ rel, reason });
+              continue; // tentatively skipped; caller may rescan
+            } else {
+              continue; // auto: skip silently
+            }
           }
         }
         // Symlink loop guard: resolve and skip already-visited directories.
@@ -205,10 +220,13 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
       }
       if (!e.isFile()) continue;
       const base = e.name;
+      if (excludeFiles?.includes(base.toLowerCase())) continue;
+      if (noVendorScan && inVendor) continue; // --no-vendor-scan: skip everything under vendor
       if (LICENSE_FILE_RE.test(base)) out.push({ abs: path.join(dir, base), rel, kind: "license" });
       else if (inVendor) continue; // vendor source code: skip
       else if (isManifest(base)) out.push({ abs: path.join(dir, base), rel, kind: "manifest" });
-      else if (SOURCE_EXT.has(path.extname(base))) out.push({ abs: path.join(dir, base), rel, kind: "source" });      }
+      else if (SOURCE_EXT.has(path.extname(base))) out.push({ abs: path.join(dir, base), rel, kind: "source" });
+    }
   }
   if (skipMode === "ask" && detected.length && opts.onSkippedDetected) {
     const decision = opts.onSkippedDetected(detected);

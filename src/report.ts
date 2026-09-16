@@ -135,6 +135,8 @@ export function toJson(r: ScanReport, opts: { includeLicenseFiles?: boolean } = 
           }
         : {}),
       findings: r.findings,
+      ...(r.scanDurationMs !== undefined ? { scanDurationMs: r.scanDurationMs } : {}),
+      ...(r.depAudit ? { depAudit: r.depAudit } : {}),
     },
     null,
     2
@@ -200,6 +202,7 @@ const severityMap: Record<Severity, string> = {
   warning: "warning",
   info: "note",
 };
+  const version = (globalThis as { __SECULAR_VERSION__?: string }).__SECULAR_VERSION__ ?? "1.2.0";
 
   const rules = [...new Set(r.findings.map((f) => f.rule))].map((id) => ({
     id,
@@ -218,7 +221,7 @@ const severityMap: Record<Severity, string> = {
           tool: {
             driver: {
               name: "secular",
-              version: "1.0.0",
+              version,
               informationUri: "https://github.com/HahaAhhDev/secular",
               rules,
             },
@@ -245,22 +248,37 @@ const severityMap: Record<Severity, string> = {
   );
 }
 
-/** Generate THIRD-PARTY-NOTICES.md from the report. */
-export function toNotices(r: ScanReport): string {
+/** Generate THIRD-PARTY-NOTICES from the report (markdown or plain text). */
+export function toNotices(r: ScanReport, opts: { format?: "markdown" | "text" } = {}): string {
   const L: string[] = [];
-  L.push("THIRD-PARTY SOFTWARE NOTICES");
-  L.push("============================");
-  L.push("");
-  L.push("This product includes software developed by third parties.");
-  L.push("");
+  const text = opts.format === "text";
+  if (text) {
+    L.push("THIRD-PARTY SOFTWARE NOTICES");
+    L.push("============================");
+    L.push("");
+    L.push("This product includes software developed by third parties.");
+    L.push("");
+  } else {
+    L.push("# Third-Party Software Notices");
+    L.push("");
+    L.push("This product includes software developed by third parties.");
+    L.push("");
+  }
   for (const [id, info] of [...r.thirdParty.entries()].sort()) {
-    L.push(`--- ${id} ---`);
-    for (const f of info.files) L.push(`  Source: ${f}`);
-    L.push(`  License: ${id}`);
+    if (text) {
+      L.push(`--- ${id} ---`);
+      for (const f of info.files) L.push(`  Source: ${f}`);
+      L.push(`  License: ${id}`);
+    } else {
+      L.push(`## ${id}`);
+      L.push("");
+      for (const f of info.files) L.push(`- Source: \`${f}\``);
+      L.push(`- License: ${id}`);
+    }
     L.push("");
   }
   if (r.thirdParty.size === 0) {
-    L.push("(No third-party license files detected.)");
+    L.push(text ? "(No third-party license files detected.)" : "*No third-party license files detected.*");
     L.push("");
   }
   return L.join("\n");
