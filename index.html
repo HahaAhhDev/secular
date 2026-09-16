@@ -62,6 +62,7 @@
     <div class="card"><h3>Fingerprint matching</h3><p>Normalizes and shingle-hashes license text, matching full files and inline headers against the SPDX catalog by containment similarity. Popularity priors disambiguate near-duplicate families.</p></div>
     <div class="card"><h3>Rules engine</h3><p>Detects copyleft in proprietary code, network copyleft in service stacks, non-open licenses, weak-copyleft obligations, and missing NOTICE files.</p></div>
     <div class="card"><h3>Manifest parsing</h3><p>Reads dependency lists from npm, Cargo, Go, PyPI, RubyGems, and Packagist manifests.</p></div>
+    <div class="card"><h3>Smart skip detection</h3><p>Bundled runtimes and dependency trees (<code>python-3.12.7/</code>, <code>node_modules</code>, <code>site-packages</code>, …) are auto-detected and skipped. Ask for a prompt, or override with <code>--scan-all</code>.</p></div>
     <div class="card"><h3>CI-native output</h3><p>Terminal, JSON, Markdown, and SARIF 2.1.0 for GitHub Code Scanning. Meaningful exit codes and a <code>--strict</code> gate.</p></div>
     <div class="card"><h3>AI adjudication (optional)</h3><p>Custom or non-SPDX license texts go to your LLM (OpenAI, Anthropic, OpenRouter, or local Ollama) and the classification folds back into the rules engine. Requires an API key — plain scanning never does.</p></div>
     <div class="card"><h3>Offline first</h3><p>The SPDX catalog is cached locally; scanning and scoring never need network access. A failed refresh falls back to the cached catalog.</p></div>
@@ -84,7 +85,12 @@ secular scan /path/to/project -f sarif -o license.sarif --strict
 secular notice /path/to/project
 
 # Classify custom licenses with AI (the only command needing a key)
-secular ai /path/to/project --api-key sk-ant-...</code></pre>
+secular ai /path/to/project --api-key sk-ant-...
+
+# Control auto-detected skip directories
+secular scan . --skip-mode ask    # prompt: [i]gnore / [s]can
+secular scan . --scan-all         # scan detected dirs too
+secular scan . --exclude fixtures # skip your own dirs too</code></pre>
 
   <p>An install script is also available for Linux/macOS — see the <a href="https://github.com/HahaAhhDev/secular#installation">README</a>.</p>
 
@@ -120,6 +126,17 @@ secular ai /path/to/project --api-key sk-ant-...</code></pre>
     <tr><td><code>secular notice [dir]</code></td><td>Generate THIRD-PARTY-NOTICES.md</td></tr>
     <tr><td><code>secular cache --refresh</code></td><td>Force-refresh the SPDX catalog cache</td></tr>
   </table>
+
+  <h2>Skip modes &amp; excludes</h2>
+  <p>Secular auto-detects directories that are not your compliance surface — bundled runtimes (<code>python-3.12.x</code>, <code>cpython-*</code>, <code>node-v*</code>, <code>jdk-*</code>, <code>miniconda*</code>), dependency trees (<code>node_modules</code>, <code>site-packages</code>, <code>Pods</code>), and build artifacts. Control what happens:</p>
+  <table>
+    <tr><th>Flag</th><th>Behavior</th></tr>
+    <tr><td><code>--skip-mode auto</code></td><td>Skip detected directories silently (default; safe for CI)</td></tr>
+    <tr><td><code>--skip-mode ask</code></td><td>Show what was detected and prompt once: <code>[i]gnore / [s]can</code> — default is ignore, <code>-y</code> answers automatically</td></tr>
+    <tr><td><code>--skip-mode scan</code> / <code>--scan-all</code></td><td>Never ask — scan the detected directories too</td></tr>
+    <tr><td><code>--exclude &lt;dir&gt;</code></td><td>Skip your own directories by name (repeatable, case-insensitive, always applies)</td></tr>
+  </table>
+  <p>The prompt writes to stderr, so JSON/SARIF output stays clean. Also settable via the <code>SECULAR_SKIP_MODE</code> environment variable. License files inside <code>vendor</code>-style directories are always scanned — vendored licenses are compliance-relevant.</p>
 
   <p>See the <a href="https://github.com/HahaAhhDev/secular#readme">full README</a> for every option, AI provider setup, environment variables, and troubleshooting.</p>
 
