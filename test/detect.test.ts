@@ -470,6 +470,72 @@ test("walk: license files inside vendor dirs are found, vendor source is not", a
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// ---------- walker: bundled runtime / module dirs ----------
+test("walk: bundled runtime dirs (python-3.12.7, cpython-3.12, jdk-21) are skipped entirely", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-rt-"));
+  for (const rt of ["python-3.12.7", "cpython-3.12.4+", "jdk-21.0.2", "node-v20.11.0", "miniconda3", "python312"]) {
+    fs.mkdirSync(path.join(dir, rt), { recursive: true });
+    fs.writeFileSync(path.join(dir, rt, "LICENSE"), "runtime license should be skipped");
+  }
+  fs.writeFileSync(path.join(dir, "LICENSE"), "MIT License\n\nreal project license");
+  const rels = walk(dir).map((f: { rel: string }) => f.rel);
+  assert.deepEqual(rels.filter((r: string) => r !== "LICENSE"), [], `got: ${rels}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("walk: site-packages / node_modules inside a project are skipped", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-pkg-"));
+  fs.mkdirSync(path.join(dir, "lib", "site-packages", "somepkg"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "lib", "site-packages", "somepkg", "LICENSE"), "skip me");
+  fs.writeFileSync(path.join(dir, "main.py"), "x = 1");
+  const rels = walk(dir).map((f: { rel: string }) => f.rel);
+  assert.ok(!rels.some((r: string) => r.includes("site-packages")));
+  assert.ok(rels.includes("main.py"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("walk: unnamed runtime dir containing python3 binary is skipped", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-bin-"));
+  const rt = path.join(dir, "tools", "py-runtime-2024");
+  fs.mkdirSync(rt, { recursive: true });
+  fs.writeFileSync(path.join(rt, "python3"), "#!/bin/sh\n");
+  fs.writeFileSync(path.join(rt, "LICENSE.PYTHON"), "PSF license should be skipped");
+  fs.writeFileSync(path.join(dir, "app.py"), "x = 1");
+  const rels = walk(dir).map((f: { rel: string }) => f.rel);
+  assert.ok(!rels.some((r: string) => r.includes("py-runtime-2024")), `got: ${rels}`);
+  assert.ok(rels.includes("app.py"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("walk: deep nesting terminates (depth cap)", async () => {
+  const { walk } = await import("../dist/walker.js");
+  let dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-deep-"));
+  let cur = dir;
+  for (let i = 0; i < 80; i++) {
+    cur = path.join(cur, "n");
+    fs.mkdirSync(cur);
+  }
+  fs.writeFileSync(path.join(cur, "a.ts"), "// deep");
+  const files = walk(dir); // must not hang
+  assert.ok(files.every((f: { rel: string }) => f.rel.split("/").length <= 65));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("manifests: oversized package.json is ignored safely", async () => {
+  const { parsePackageJson } = await import("../dist/manifests.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-big-"));
+  const file = path.join(dir, "package.json");
+  fs.writeFileSync(file, JSON.stringify({ dependencies: Object.fromEntries(
+    Array.from({ length: 140_000 }, (_, i) => [`pkg-${i}`, "*"])
+  ) }));
+  // > 2MB → treated as not-a-manifest rather than parsed
+  assert.equal(parsePackageJson(file, "package.json").length, 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---------- report: color toggle + json extras ----------
 test("terminal: --no-color produces no ANSI escape codes", async () => {
   const { terminal } = await import("../dist/report.js");

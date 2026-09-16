@@ -10,7 +10,7 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 ## How it works
 
-1. **Walk** — traverse the repo, skipping `node_modules`, `.git`, `dist`, `build`, and other artifact directories. License files inside `vendor`-style directories are still collected (their source code is skipped).
+1. **Walk** — traverse the repo, skipping `node_modules`, `.git`, `dist`, `build`, and other artifact directories. Bundled runtimes and package trees (`python-3.12.7/`, `cpython-*`, `node-v*`, `jdk-*`, `miniconda*`, `site-packages`, …) are skipped entirely — their licenses are not your project's compliance surface. License files inside `vendor`-style directories are still collected (their source code is skipped).
 2. **Fingerprint** — normalize license text (lowercase, strip copyright years and placeholders), hash into 8-word shingles, and match against SPDX by containment similarity. A popularity prior breaks ties between near-duplicate families, so a truncated MIT file matches `MIT` — not `MIT-0` or `X11`. Root `LICENSE` files demand ≥90% confidence.
 3. **Parse manifests** — `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `Gemfile`, `composer.json`.
 4. **Detect headers** — `SPDX-License-Identifier:` tags and full license text in the first 2 KB of source files.
@@ -194,7 +194,7 @@ secular ai . --provider ollama
 npm install
 npm run typecheck    # strict typecheck, no emit
 npm run build        # compile to dist/
-npm test             # 43 tests over detect, manifests, walker, rules, meta, report, ai
+npm test             # 53 tests over detect, manifests, walker, rules, meta, report, ai
 ```
 
 ### Releasing

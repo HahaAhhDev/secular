@@ -14,9 +14,22 @@ export interface Dep {
   source: string;
 }
 
+/** Guard against absurd manifest sizes (minified lockfiles accidentally matched). */
+function readIfSmall(abs: string, maxBytes = 2_000_000): string | null {
+  try {
+    const st = fs.statSync(abs);
+    if (!st.isFile() || st.size > maxBytes) return null;
+    return fs.readFileSync(abs, "utf8");
+  } catch {
+    return null;
+  }
+}
+
 export function parsePackageJson(abs: string, source: string): Dep[] {
   try {
-    const pkg = JSON.parse(fs.readFileSync(abs, "utf8"));
+    const raw = readIfSmall(abs);
+    if (raw === null) return [];
+    const pkg = JSON.parse(raw);
     if (!pkg || typeof pkg !== "object" || Array.isArray(pkg)) return [];
     const deps: Dep[] = [];
     const add = (obj: unknown, scope: "dependency" | "dev") => {
@@ -38,7 +51,8 @@ export function parsePackageJson(abs: string, source: string): Dep[] {
 
 export function parseCargoToml(abs: string, source: string): Dep[] {
   try {
-    const text = fs.readFileSync(abs, "utf8");
+    const text = readIfSmall(abs);
+    if (text === null) return [];
     const deps: Dep[] = [];
     let section = "";
     for (const line of text.split(/\r?\n/)) {
@@ -64,7 +78,8 @@ export function parseCargoToml(abs: string, source: string): Dep[] {
 
 export function parseGoMod(abs: string, source: string): Dep[] {
   try {
-    const text = fs.readFileSync(abs, "utf8");
+    const text = readIfSmall(abs);
+    if (text === null) return [];
     const deps: Dep[] = [];
     let inRequireBlock = false;
     for (const line of text.split(/\r?\n/)) {
@@ -85,7 +100,8 @@ export function parseGoMod(abs: string, source: string): Dep[] {
 
 export function parsePyproject(abs: string, source: string): Dep[] {
   try {
-    const text = fs.readFileSync(abs, "utf8");
+    const text = readIfSmall(abs);
+    if (text === null) return [];
     const deps: Dep[] = [];
     let inDeps = false;
     for (const line of text.split(/\r?\n/)) {
@@ -106,7 +122,8 @@ export function parsePyproject(abs: string, source: string): Dep[] {
 
 export function parseGemfile(abs: string, source: string): Dep[] {
   try {
-    const text = fs.readFileSync(abs, "utf8");
+    const text = readIfSmall(abs);
+    if (text === null) return [];
     const deps: Dep[] = [];
     for (const line of text.split(/\r?\n/)) {
       const m = line.match(/^\s*gem\s+["']([^"']+)["']/);
@@ -120,7 +137,9 @@ export function parseGemfile(abs: string, source: string): Dep[] {
 
 export function parseComposerJson(abs: string, source: string): Dep[] {
   try {
-    const pkg = JSON.parse(fs.readFileSync(abs, "utf8"));
+    const raw = readIfSmall(abs);
+    if (raw === null) return [];
+    const pkg = JSON.parse(raw);
     const deps: Dep[] = [];
     const add = (obj: unknown, scope: "dependency" | "dev") => {
       if (!obj || typeof obj !== "object") return;

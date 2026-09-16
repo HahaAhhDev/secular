@@ -94,6 +94,18 @@ function readCache(): CacheFile | null {
 }
 
 function writeCache(cache: CacheFile): void {
+  // Atomic write: tmp file + rename, so a crash/kill mid-write can never
+  // leave a truncated licenses.json that would poison every future scan.
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(LICENSES_JSON, JSON.stringify(cache));
+  const tmp = `${LICENSES_JSON}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(cache));
+    fs.renameSync(tmp, LICENSES_JSON);
+  } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+    throw new Error(
+      `cannot write SPDX catalog cache to ${CACHE_DIR} (disk full or read-only?). ` +
+      `Set SECULAR_HOME to a writable directory.`
+    );
+  }
 }

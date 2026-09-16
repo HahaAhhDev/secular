@@ -22,6 +22,56 @@ export const SKIP_DIRS = new Set([
  */
 export const VENDOR_DIRS = new Set(["vendor", "third_party", "third-party", "deps", "external"]);
 
+/**
+ * Package-manager-managed dependency trees: skipped ENTIRELY, licenses
+ * included. These hold installed copies of published packages whose licenses
+ * are not this project's compliance surface (they come from the manifest,
+ * not the disk). Vendored code in `vendor/` etc. is different — those are
+ * checked in and DO get their licenses scanned.
+ */
+export const MODULE_DIRS = new Set([
+  "node_modules", "site-packages", "dist-packages", "__pypackages__",
+  "jspm_packages", "bower_components", "Pods", "packages",
+]);
+
+/** Directory names that are almost certainly an interpreter/runtime install. */
+const RUNTIME_DIR_RE =
+  /^(?:python-?\d+(?:\.\d+)*|python\d{2,}|cpython-?\d[\w.+-]*|pypy-?\d[\w.+-]*|node-?v?\d+[\w.]*|iojs-?v?\d+[\w.]*|jdk-?\d[\w.+-]*|jre-?\d[\w.+-]*|openjdk[\w.+-]*|temurin[\w.+-]*|dotnet(?:-sdk)?-?\d[\w.+-]*|mono-?\d[\w.+-]*|(?:micro|mini|ana)mamba\d*|miniconda\d*|anaconda\d*|conda-?\d[\w.+-]*|ruby-?\d[\w.+-]*|php-?\d[\w.+-]*|go1[\w.+-]*|rust-?\d[\w.+-]*|erlang-?\d[\w.+-]*|elixir-?\d[\w.+-]*)$/i;
+
+/** Looser smell used to trigger a cheap content check for runtime installs. */const TOOLCHAIN_SMELL_RE = /(?:py|python|node|jdk|jre|ruby|php|dotnet|mono|conda|mamba|erlang|elixir|rust|swift|perl|tcl)[-_ a-z]*\d/i;
+
+/**
+ * Content-based runtime detection: a directory that *contains* an interpreter
+ * (bin/python3, lib/libpython3.so, python.exe, node.exe, ...) is a runtime
+ * install regardless of its name. Only called for names that smell like a
+ * toolchain, so normal project dirs pay no cost.
+ */
+function looksLikeRuntimeInstall(abs: string): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(abs, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some((e) =>
+    /^(?:python\d?(?:\.exe)?|python3(?:\.\d+)?(?:\.exe)?|node(?:\.exe)?|java(?:\.exe)?|dotnet(?:\.exe)?|ruby(?:\.exe)?|php(?:\.exe)?)$/i.test(e.name) ||
+    /^libpython\d/i.test(e.name) ||
+    (e.isDirectory() && (e.name === "bin" || e.name === "lib") && runtimeSignatureIn(path.join(abs, e.name))) ||
+    /^python\d+(?:\._pth|\d+\.dll|\d+\.zip)$/i.test(e.name) ||
+    /^LICENSE\.PYTHON$/i.test(e.name),
+  );
+}
+
+function runtimeSignatureIn(dir: string): boolean {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some((e) => /^(?:python\d?(?:\.\d+)?(?:\.exe)?|node(?:\.exe)?|libpython\d|python\d+\.dll)$/i.test(e.name));
+}
+
 const LICENSE_FILE_RE = /^(?:UN)?LICEN[CS]E(?:[.\-_ ][A-Za-z0-9]+)*$|^(?:UN)?LICEN[CS]E[.\-_ ]|COPYING|NOTICE|COPYRIGHT|PATENTS|AUTHORS|THIRD[-_ ]?PARTY|LEGAL/i;
 const MANIFEST_FILES = new Set([
   "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb",
@@ -65,10 +115,15 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
   // Visited real paths guard against symlink loops (a→b→a).
   const visited = new Set<string>([fs.realpathSync.native(root)]);
   // Queue entries carry the vendor context: inside a vendor dir we collect
-  // license files only.
-  const queue: { dir: string; rel: string; inVendor: boolean }[] = [{ dir: root, rel: "", inVendor: false }];
+  // license files only. Bounded to keep scans on pathological trees (deeply
+  // nested generated dirs) from exhausting memory.
+  const MAX_DEPTH = 64;
+  const queue: { dir: string; rel: string; inVendor: boolean; depth: number }[] = [
+    { dir: root, rel: "", inVendor: false, depth: 0 },
+  ];
   while (queue.length && out.length < maxFiles) {
-    const { dir, rel: parentRel, inVendor } = queue.shift()!;
+    const { dir, rel: parentRel, inVendor, depth } = queue.shift()!;
+    if (depth > MAX_DEPTH) continue;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -80,8 +135,7 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
       if (e.isDirectory() || e.isSymbolicLink()) {
         const abs = path.join(dir, e.name);
         if (e.isDirectory()) {
-          if (SKIP_DIRS.has(e.name) || e.name.startsWith(".")) continue;
-          if (shouldExclude(e.name, opts.exclude)) continue;
+          if (skipDir(abs, e.name, opts.exclude)) continue;
         } else {
           // Symlink: follow only when it points at a directory.
           let st: fs.Stats;
@@ -91,7 +145,7 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
             continue; // broken symlink
           }
           if (!st.isDirectory()) continue;
-          if (SKIP_DIRS.has(e.name) || e.name.startsWith(".") || shouldExclude(e.name, opts.exclude)) continue;
+          if (skipDir(abs, e.name, opts.exclude)) continue;
         }
         // Symlink loop guard: resolve and skip already-visited directories.
         let real: string;
@@ -102,7 +156,7 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
         }
         if (visited.has(real)) continue;
         visited.add(real);
-        queue.push({ dir: abs, rel, inVendor: inVendor || VENDOR_DIRS.has(e.name) });
+        queue.push({ dir: abs, rel, inVendor: inVendor || VENDOR_DIRS.has(e.name), depth: depth + 1 });
         continue;
       }
       if (!e.isFile()) continue;
@@ -114,6 +168,16 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
     }
   }
   return out;
+}
+
+/** Unified skip decision for a directory (real or symlinked). */
+function skipDir(abs: string, name: string, exclude?: string[]): boolean {
+  if (SKIP_DIRS.has(name) || MODULE_DIRS.has(name)) return true;
+  if (name.startsWith(".") || shouldExclude(name, exclude)) return true;
+  if (VENDOR_DIRS.has(name)) return false; // licenses inside are wanted
+  if (RUNTIME_DIR_RE.test(name)) return true;
+  if (TOOLCHAIN_SMELL_RE.test(name) && looksLikeRuntimeInstall(abs)) return true;
+  return false;
 }
 
 function isManifest(base: string): boolean {
