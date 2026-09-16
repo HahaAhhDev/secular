@@ -10,7 +10,7 @@ Everything runs offline. The only feature that touches the network is AI adjudic
 
 ## How it works
 
-1. **Walk** — traverse the repo, skipping `node_modules`, `.git`, `dist`, `build`, and other artifact directories. Bundled runtimes and package trees (`python-3.12.7/`, `cpython-*`, `node-v*`, `jdk-*`, `miniconda*`, `site-packages`, …) are skipped entirely — their licenses are not your project's compliance surface. License files inside `vendor`-style directories are still collected (their source code is skipped).
+1. **Walk** — traverse the repo, skipping `node_modules`, `.git`, `dist`, `build`, and other artifact directories. Bundled runtimes and package trees (`python-3.12.7/`, `cpython-*`, `node-v*`, `jdk-*`, `miniconda*`, `site-packages`, …) are detected automatically and skipped — their licenses are not your project's compliance surface. License files inside `vendor`-style directories are still collected (their source code is skipped). Control this with `--skip-mode`: `ask` prompts once (ignore/scan), `scan` (or `--scan-all`) includes detected directories.
 2. **Fingerprint** — normalize license text (lowercase, strip copyright years and placeholders), hash into 8-word shingles, and match against SPDX by containment similarity. A popularity prior breaks ties between near-duplicate families, so a truncated MIT file matches `MIT` — not `MIT-0` or `X11`. Root `LICENSE` files demand ≥90% confidence.
 3. **Parse manifests** — `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `Gemfile`, `composer.json`.
 4. **Detect headers** — `SPDX-License-Identifier:` tags and full license text in the first 2 KB of source files.
@@ -101,6 +101,9 @@ secular cache --refresh            # refresh the SPDX catalog cache
 | `--min-severity <sev>` | Only report findings at or above: `info` \| `warning` \| `error` \| `critical` |
 | `--fail-on-rule <rule>` | Exit 1 when a finding matches this rule, regardless of severity. Repeatable. Rules: `COPYLEFT-IN-PROPRIETARY`, `NETWORK-COPYLEFT`, `NON-OPEN-LICENSE`, `PROJECT-LICENSE-CONFLICT`, `PROJECT-LICENSE-UNFREE`, `WEAK-COPYLEFT`, `UNKNOWN-LICENSE`, `MISSING-NOTICE` |
 | `--exclude <dir>` | Skip a directory by name at any depth (repeatable, case-insensitive) |
+| `--skip-mode <mode>` | Control auto-detected skips: `auto` (default — skip silently) \| `ask` (show what was detected, prompt once) \| `scan` (scan detected dirs too). Also via `SECULAR_SKIP_MODE` env |
+| `--scan-all` | Shorthand for `--skip-mode scan` |
+| `-y, --yes` | In `ask` mode, answer "ignore" automatically (for semi-interactive use) |
 | `--no-color` | Disable colored terminal output (auto-disabled when output is not a terminal; respects `NO_COLOR` / `FORCE_COLOR`) |
 | `--json-include-license-files` | Include per-file license matches with confidence in JSON output |
 | `--strict` | Exit non-zero if any finding exists at or above the threshold (CI gate) |
@@ -187,6 +190,7 @@ secular ai . --provider ollama
 | `SECULAR_BASE_URL` | Override the API endpoint |
 | `SECULAR_HOME` | Redirect the cache directory (default: home dir) |
 | `SECULAR_DEBUG` | Print full stack traces on internal errors |
+| `SECULAR_SKIP_MODE` | Default skip-mode: `auto` (default) \| `ask` \| `scan` |
 
 ## Development
 

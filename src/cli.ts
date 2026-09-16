@@ -43,6 +43,8 @@ interface Args {
   strict?: boolean;
   noColor?: boolean;
   includeLicenseFiles?: boolean;
+  skipMode?: "auto" | "ask" | "scan";
+  yes?: boolean;
 }
 
 const SEV_ORDER = ["info", "warning", "error", "critical"];
@@ -137,6 +139,22 @@ function parseArgs(argv: string[]): Args {
       case "--json-include-license-files":
         args.includeLicenseFiles = true;
         break;
+      case "--skip-mode": {
+        const m = shiftValue(a);
+        if (m !== "auto" && m !== "ask" && m !== "scan") {
+          console.error("error: --skip-mode must be one of: auto, ask, scan");
+          process.exit(2);
+        }
+        args.skipMode = m;
+        break;
+      }
+      case "--scan-all":
+        args.skipMode = "scan";
+        break;
+      case "-y":
+      case "--yes":
+        args.yes = true;
+        break;
       case "--no-color":
         args.noColor = true;
         break;
@@ -194,7 +212,11 @@ ${"\u001b[1m"}OPTIONS${"\u001b[0m"}
       --min-severity <s>  Filter: info | warning | error | critical
       --fail-on-rule <r>  Exit 1 if a finding matches this rule (repeatable)
       --exclude <dir>     Skip a directory by name (repeatable)
-      --strict            Exit 1 on any finding at/above the threshold
+      --skip-mode <mode>  Auto-detected skip handling: auto (default, skip
+                          silently) | ask (prompt per detection) | scan (scan
+                          detected dirs too). SECULAR_SKIP_MODE env also works.
+      --scan-all          Shorthand for --skip-mode scan
+      -y, --yes           In ask mode, auto-answer "ignore" (non-interactive)
       --no-color          Disable colored terminal output
       --json-include-license-files  Include per-file license matches in JSON
       --refresh           Force SPDX catalog refresh
@@ -230,8 +252,72 @@ function useColor(noColor?: boolean): boolean {
   return Boolean(process.stdout.isTTY);
 }
 
+/**
+ * Skip-permission handler for "ask" mode. Prints the auto-detected skip
+ * candidates and asks once: ignore (skip them — safe default) or continue
+ * (scan them). Falls back to "ignore" when not interactive or when -y given.
+ */
+function makeSkipDecision(): (skipped: { rel: string; reason: string }[]) => "ignore" | "scan" {
+  const decision = (function ask(this: { _firstByte?: string }, skipped: { rel: string; reason: string }[]): "ignore" | "scan" {
+    console.error(`\nsecular detected ${skipped.length} director${skipped.length === 1 ? "y" : "ies"} it would normally skip:`);
+    for (const s of skipped.slice(0, 10)) {
+      console.error(`  · ${s.rel}  (${s.reason})`);
+    }
+    if (skipped.length > 10) console.error(`  · … and ${skipped.length - 10} more`);
+    if (args.yes) {
+      console.error("  → ignoring (-y given)");
+      return "ignore";
+    }
+    if (!process.stdin.isTTY) {
+      // Piped input can still carry an answer (e.g. `printf 's\n' | secular ...`).
+      // Only EOF (empty stdin) means non-interactive.
+      try {
+        const probe = Buffer.alloc(1);
+        if (fs.readSync(0, probe, 0, 1, null) === 0) {
+          console.error("  → ignoring (non-interactive; use --scan-all to scan them)");
+          return "ignore";
+        }
+        // Push the byte back by remembering it — read the rest of the line manually below.
+        (decision as { _firstByte?: string })._firstByte = probe.toString();
+      } catch {
+        console.error("  → ignoring (non-interactive; use --scan-all to scan them)");
+        return "ignore";
+      }
+    }
+    console.error("  Scan these directories anyway? [i]gnore / [s]can (default: ignore)");
+    process.stderr.write("> ");
+    // Synchronous single-byte read: works on TTYs and pipes alike.
+    const buf = Buffer.alloc(1);
+    let byte: string | null;
+    const first = decision._firstByte;
+    if (first !== undefined) {
+      byte = first.toLowerCase();
+      delete decision._firstByte;
+    } else {
+      try {
+        byte = fs.readSync(0, buf, 0, 1, null) === 0 ? null : buf.toString().trim().toLowerCase();
+      } catch {
+        byte = null;
+      }
+    }
+    if (byte === "s") {
+      console.error("  → scanning detected directories");
+      return "scan";
+    }
+    console.error("  → ignoring");
+    return "ignore";
+  } as ((this: { _firstByte?: string }, skipped: { rel: string; reason: string }[]) => "ignore" | "scan") & { _firstByte?: string });
+  return decision;
+}
+let args: Args; // populated by main; used by makeSkipDecision for -y
+
 async function main(): Promise<number> {
-  const args = parseArgs(process.argv.slice(2));
+  args = parseArgs(process.argv.slice(2));
+  const skipMode = args.skipMode ?? ((process.env.SECULAR_SKIP_MODE as Args["skipMode"]) || "auto");
+  const skipOpts = {
+    skipMode: skipMode as "auto" | "ask" | "scan",
+    onSkipDecision: skipMode === "ask" ? makeSkipDecision() : undefined,
+  };
 
   if (args.command === "cache") {
     // With --refresh: always refetch. Without: only fetch if no fresh cache
@@ -249,7 +335,7 @@ async function main(): Promise<number> {
   }
 
   if (args.command === "notice") {
-    const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude });
+    const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude, ...skipOpts });
     const notices = toNotices(report);
     const out = args.output ?? "THIRD-PARTY-NOTICES.md";
     writeOutput(notices, out);
@@ -271,7 +357,7 @@ async function main(): Promise<number> {
     }
   }
 
-  const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude });
+  const report = await scan({ root: args.dir, refreshCatalog: args.refresh, exclude: args.exclude, ...skipOpts });
   report.usedAi = useAi;
 
   // AI adjudication of unknown / low-confidence licenses. Applies when the

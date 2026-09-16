@@ -470,6 +470,39 @@ test("walk: license files inside vendor dirs are found, vendor source is not", a
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// ---------- walker: skip-mode (auto / scan / ask) ----------
+test("walk: skipMode scan includes runtime dirs, auto excludes them", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-mode-"));
+  fs.mkdirSync(path.join(dir, "python-3.12.7"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "python-3.12.7", "LICENSE"), "PSF-ish license text here");
+  fs.writeFileSync(path.join(dir, "LICENSE"), "project license");
+  const auto = walk(dir).map((f: { rel: string }) => f.rel);
+  assert.ok(!auto.some((r: string) => r.includes("python-3.12.7")));
+  const all = walk(dir, 50_000, { skipMode: "scan" }).map((f: { rel: string }) => f.rel);
+  assert.ok(all.includes("python-3.12.7/LICENSE"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("walk: skipMode ask reports candidates via callback and honors scan decision", async () => {
+  const { walk } = await import("../dist/walker.js");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sec-ask-"));
+  fs.mkdirSync(path.join(dir, "node_modules", "x"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "node_modules", "x", "LICENSE"), "dep license");
+  fs.writeFileSync(path.join(dir, "LICENSE"), "project license");
+  let candidates: { rel: string; reason: string }[] = [];
+  // decision "ignore": stays skipped
+  walk(dir, 50_000, { skipMode: "ask", onSkippedDetected: (s) => { candidates = s; } });
+  assert.deepEqual(candidates.map((c) => c.rel), ["node_modules"]);
+  // decision "scan": rescanned and included
+  const files = walk(dir, 50_000, {
+    skipMode: "ask",
+    onSkippedDetected: () => null,
+  }).map((f: { rel: string }) => f.rel);
+  assert.ok(files.includes("node_modules/x/LICENSE"));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 // ---------- walker: bundled runtime / module dirs ----------
 test("walk: bundled runtime dirs (python-3.12.7, cpython-3.12, jdk-21) are skipped entirely", async () => {
   const { walk } = await import("../dist/walker.js");

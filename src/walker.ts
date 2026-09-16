@@ -88,6 +88,21 @@ export interface FoundFile {
   kind: "license" | "manifest" | "source";
 }
 
+/** A directory the walker wants to skip, with the reason it was detected. */
+export interface SkippedDir {
+  rel: string;
+  /** Why it was flagged: known artifact/package/runtime name, or content sniff. */
+  reason: "package-tree" | "build-artifact" | "runtime" | "hidden" | "excluded";
+}
+
+/**
+ * What the walker should do with auto-detected skip candidates:
+ * - "auto" (default): skip silently — current behavior, safe for CI.
+ * - "scan": include them (user opted to scan everything).
+ * - "ask": collect candidates and let the caller decide (interactive).
+ */
+export type SkipMode = "auto" | "scan" | "ask";
+
 const SOURCE_EXT = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rb", ".go", ".rs",
   ".c", ".h", ".cpp", ".hpp", ".cc", ".java", ".kt", ".swift", ".m", ".mm",
@@ -98,6 +113,20 @@ const SOURCE_EXT = new Set([
 export interface WalkOptions {
   /** Directory names (any depth) to skip entirely. Case-insensitive. */
   exclude?: string[];
+  /** What to do with auto-detected skip candidates. Default "auto". */
+  skipMode?: SkipMode;
+  /** Output for "ask" mode: detected candidates are reported here. Return null to scan them all instead. */
+  onSkippedDetected?: (skipped: SkippedDir[]) => SkippedDir[] | null | void;
+}
+
+export function classifySkip(name: string, abs: string): SkippedDir["reason"] | null {
+  if (MODULE_DIRS.has(name)) return "package-tree";
+  if (SKIP_DIRS.has(name)) return "build-artifact";
+  if (name.startsWith(".")) return "hidden";
+  if (VENDOR_DIRS.has(name)) return null;
+  if (RUNTIME_DIR_RE.test(name)) return "runtime";
+  if (TOOLCHAIN_SMELL_RE.test(name) && looksLikeRuntimeInstall(abs)) return "runtime";
+  return null;
 }
 
 function shouldExclude(name: string, exclude?: string[]): boolean {
@@ -112,6 +141,10 @@ function shouldExclude(name: string, exclude?: string[]): boolean {
 
 export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): FoundFile[] {
   const out: FoundFile[] = [];
+  const skipMode: SkipMode = opts.skipMode ?? "auto";
+  const detected: SkippedDir[] = [];
+  // User --exclude always applies regardless of mode.
+  const exclude = opts.exclude;
   // Visited real paths guard against symlink loops (a→b→a).
   const visited = new Set<string>([fs.realpathSync.native(root)]);
   // Queue entries carry the vendor context: inside a vendor dir we collect
@@ -134,9 +167,8 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
       const rel = parentRel ? `${parentRel}/${e.name}` : e.name;
       if (e.isDirectory() || e.isSymbolicLink()) {
         const abs = path.join(dir, e.name);
-        if (e.isDirectory()) {
-          if (skipDir(abs, e.name, opts.exclude)) continue;
-        } else {
+        let isDir = e.isDirectory();
+        if (!isDir) {
           // Symlink: follow only when it points at a directory.
           let st: fs.Stats;
           try {
@@ -145,7 +177,19 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
             continue; // broken symlink
           }
           if (!st.isDirectory()) continue;
-          if (skipDir(abs, e.name, opts.exclude)) continue;
+          isDir = true;
+        }
+        if (shouldExclude(e.name, exclude)) continue;
+        const reason = classifySkip(e.name, abs);
+        if (reason) {
+          if (skipMode === "scan") {
+            // User chose to scan detected candidates: fall through.
+          } else if (skipMode === "ask") {
+            detected.push({ rel, reason });
+            continue; // tentatively skipped; caller may rescan
+          } else {
+            continue; // auto: skip silently
+          }
         }
         // Symlink loop guard: resolve and skip already-visited directories.
         let real: string;
@@ -164,20 +208,23 @@ export function walk(root: string, maxFiles = 50_000, opts: WalkOptions = {}): F
       if (LICENSE_FILE_RE.test(base)) out.push({ abs: path.join(dir, base), rel, kind: "license" });
       else if (inVendor) continue; // vendor source code: skip
       else if (isManifest(base)) out.push({ abs: path.join(dir, base), rel, kind: "manifest" });
-      else if (SOURCE_EXT.has(path.extname(base))) out.push({ abs: path.join(dir, base), rel, kind: "source" });
+      else if (SOURCE_EXT.has(path.extname(base))) out.push({ abs: path.join(dir, base), rel, kind: "source" });      }
+  }
+  if (skipMode === "ask" && detected.length && opts.onSkippedDetected) {
+    const decision = opts.onSkippedDetected(detected);
+    if (decision === null) {
+      // Caller chose "scan": re-run with everything included.
+      return walk(root, maxFiles, { ...opts, skipMode: "scan" });
     }
   }
+  lastSkipped = detected;
   return out;
 }
 
-/** Unified skip decision for a directory (real or symlinked). */
-function skipDir(abs: string, name: string, exclude?: string[]): boolean {
-  if (SKIP_DIRS.has(name) || MODULE_DIRS.has(name)) return true;
-  if (name.startsWith(".") || shouldExclude(name, exclude)) return true;
-  if (VENDOR_DIRS.has(name)) return false; // licenses inside are wanted
-  if (RUNTIME_DIR_RE.test(name)) return true;
-  if (TOOLCHAIN_SMELL_RE.test(name) && looksLikeRuntimeInstall(abs)) return true;
-  return false;
+/** Populated after walk() runs in "ask" mode: what was detected/skipped. */
+export let lastSkipped: SkippedDir[] = [];
+export function resetLastSkipped(): void {
+  lastSkipped = [];
 }
 
 function isManifest(base: string): boolean {

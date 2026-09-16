@@ -5,7 +5,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { walk, type FoundFile } from "./walker.js";
+import { walk, resetLastSkipped, lastSkipped, type SkipMode, type SkippedDir, type FoundFile } from "./walker.js";
 import { buildIndex, identify, type FingerprintMatch } from "./detect.js";
 import { loadCatalog, type SpdxCatalog } from "./spdx.js";
 import { getMeta, type Category } from "./meta.js";
@@ -46,6 +46,10 @@ export interface ScanOptions {
   proprietary?: boolean;
   /** Directory names to skip entirely during the walk. */
   exclude?: string[];
+  /** What to do with auto-detected skip candidates: auto | scan | ask. */
+  skipMode?: SkipMode;
+  /** Called in "ask" mode with detected candidates; return "scan" to include, "ignore" to skip. */
+  onSkipDecision?: (skipped: SkippedDir[]) => "ignore" | "scan" | void;
   /** Max license files sent for AI adjudication (ai command). */
   maxAdjudicate?: number;
 }
@@ -68,7 +72,16 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
   const deprecatedIds = new Set(catalog.licenses.filter((l) => l.isDeprecatedLicenseId).map((l) => l.licenseId));
   const index = buildIndex(catalog);
 
-  const files = walk(root, 50_000, { exclude: opts.exclude });
+  const skipMode: SkipMode = opts.skipMode ?? "auto";
+  resetLastSkipped();
+  const files = walk(root, 50_000, {
+    exclude: opts.exclude,
+    skipMode,
+    onSkippedDetected:
+      skipMode === "ask" && opts.onSkipDecision
+        ? ((detected: SkippedDir[]) => (opts.onSkipDecision!(detected) === "scan" ? null : undefined)) as (s: SkippedDir[]) => SkippedDir[] | null | void
+        : undefined,
+  });
   const licenseFiles: LicenseHit[] = [];
   const rootLicenses = new Map<string, { category: Category; file?: string }>();
   const projectLicenses = new Map<string, { category: Category; file?: string }>();
@@ -190,6 +203,10 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
     catalogVersion: catalog.licenseListVersion,
     usedAi: false,
   };
+}
+
+export function getSkippedDirs(): SkippedDir[] {
+  return lastSkipped;
 }
 
 /** Shared context builder so CLI re-evaluation matches scan-time logic exactly. */
