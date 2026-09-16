@@ -70,11 +70,8 @@
   </div>
 
   <h2 id="quickstart">Quick start</h2>
-  <pre><code># Install (one-time npm setup for GitHub Packages)
-github_token=$(gh auth token)   # or a PAT with read:packages
-npm config set @hahaahhdev:registry https://npm.pkg.github.com
-npm config set //npm.pkg.github.com/:_authToken="$github_token"
-npm install -g @hahaahhdev/secular
+  <pre><code># Install — one line, no npm auth, no git (Linux/macOS; Git Bash/WSL on Windows)
+curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh | bash
 
 # Scan any directory — no API key needed
 secular scan /path/to/project
@@ -93,7 +90,16 @@ secular scan . --skip-mode ask    # prompt: [i]gnore / [s]can
 secular scan . --scan-all         # scan detected dirs too
 secular scan . --exclude fixtures # skip your own dirs too</code></pre>
 
-  <p>An install script is also available for Linux/macOS — see the <a href="https://github.com/HahaAhhDev/secular#installation">README</a>.</p>
+  <h2>Ways to install</h2>
+  <table>
+    <tr><th>Route</th><th>How</th><th>Notes</th></tr>
+    <tr><td><strong>Installer</strong> (recommended)</td><td><code>curl -fsSL https://raw.githubusercontent.com/HahaAhhDev/secular/master/install.sh | bash</code></td><td>Prebuilt tarball from GitHub Releases. No npm, no auth, no git. Linux/macOS; Windows via Git Bash/WSL.</td></tr>
+    <tr><td>npx / npm</td><td><code>npx @hahaahhdev/secular scan .</code></td><td>Requires one-time GitHub Packages auth (a GitHub token). Works on Windows via Node directly.</td></tr>
+    <tr><td>GitHub Packages (npm install)</td><td>token setup + <code>npm install -g @hahaahhdev/secular</code></td><td><em>Least recommended</em>: same auth setup as npx, and pins the install to npm config on the machine.</td></tr>
+    <tr><td>From source</td><td>git clone → <code>npm install && npm run build</code></td><td>For development; <code>npm link</code> puts <code>secular</code> on PATH.</td></tr>
+  </table>
+
+  <p>See the <a href="https://github.com/HahaAhhDev/secular#installation">README</a> for full details and uninstall instructions.</p>
 
   <h2>Rules &amp; severities</h2>
   <table>
