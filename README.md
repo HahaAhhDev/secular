@@ -2,6 +2,8 @@
 
 **License compliance scanning for your codebase — with optional AI adjudication for custom licenses.**
 
+**Notice:** ***Made by an AI agent***
+
 📖 **Web documentation:** [hahaahhdev.github.io/secular](https://hahaahhdev.github.io/secular/)
 
 📚 **Full docs:** [docs/](docs/) — installing, CLI reference, config, rules, skip modes, AI adjudication
